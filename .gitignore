@@ -1,0 +1,50 @@
+# ---- Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+venv/
+
+# ---- Logs e temporários
+*.log
+*.tmp
+*.swp
+*.bak
+*.bak-*
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Credenciais e segredos (NUNCA versionar)
+.env
+.env.*
+.aws/
+.kube/
+.ssh/
+credentials
+credentials.*
+# arquivo estilo ~/.aws/config solto na raiz do repo
+/config
+config.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*token*
+*secret*
+*.kubeconfig
+kubeconfig
+
+# ---- Saídas locais de instalação/execução
+noc-aws.json
+!agents/noc-aws.json.template
+allowlist-*.json
+out/
+dist/
