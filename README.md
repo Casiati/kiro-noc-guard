@@ -127,7 +127,7 @@ As ferramentas opcionais ausentes apenas deixam os padrões correspondentes iner
 ## Instalação rápida
 
 ```bash
-git clone https://github.com/<seu-usuario>/kiro-noc-guard.git
+git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
 ./install.sh
 ```
@@ -188,6 +188,7 @@ gerador e rodar a suíte — não relaxar a config à mão.
 .
 ├── agents/noc-aws.json.template     # config base do agente (sem as listas geradas)
 ├── scripts/generate_allowlist.py    # gerador das listas + suíte de testes
+├── skills/                          # scripts adicionais (como a busca no CloudTrail)
 ├── steering/noc-readonly-first.md   # diretriz de comportamento (sempre no contexto)
 ├── install.sh                       # instalador idempotente, com backup
 ├── .gitignore
@@ -200,7 +201,6 @@ gerador e rodar a suíte — não relaxar a config à mão.
   pelo gerador, não a olho nu no JSON.
 - A camada PROMPT depende de o assistente perguntar. Em modo `--no-interactive` não há
   quem aprove: a chamada é recusada, o que é o comportamento seguro.
-
 - Testado no Kiro CLI em Linux. `%USERPROFILE%\.kiro` (Windows) não foi validado.
 
 ## Aviso
