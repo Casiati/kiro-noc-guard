@@ -200,10 +200,7 @@ gerador e rodar a suíte — não relaxar a config à mão.
   pelo gerador, não a olho nu no JSON.
 - A camada PROMPT depende de o assistente perguntar. Em modo `--no-interactive` não há
   quem aprove: a chamada é recusada, o que é o comportamento seguro.
-- O steering file referencia um *skill* opcional de resolução de profile AWS
-  (`aws_profile_resolver.py`) que **não faz parte deste repositório**, por ser
-  específico de ambiente. Sem ele, apenas a instrução perde efeito prático; o agente
-  continua funcionando. O padrão que libera esse script é inerte se ele não existir.
+
 - Testado no Kiro CLI em Linux. `%USERPROFILE%\.kiro` (Windows) não foi validado.
 
 ## Aviso
@@ -219,11 +216,9 @@ Defina antes de publicar (sugestão: MIT). Não há arquivo `LICENSE` neste repo
 
 ## Skill: Busca Rápida no CloudTrail
 
-O \
-oc-aws\ inclui um script Python customizado (\search_trail.py\) que resolve a lentidão e as limitações de paginação do \ws cloudtrail lookup-events\.
+O `noc-aws` inclui um script Python customizado (`search_trail.py`) que resolve a lentidão e as limitações de paginação do `aws cloudtrail lookup-events`.
 
 Exemplos de uso que o agente executa automaticamente:
-- \python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --since 2h\
-- \python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --event-name StopInstances --since 24h\
-- \python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --errors-only\
-
+- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --since 2h`
+- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --event-name StopInstances --since 24h`
+- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --errors-only`
