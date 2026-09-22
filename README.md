@@ -212,7 +212,7 @@ por engano até a sessão.
 
 ## Licença
 
-Defina antes de publicar (sugestão: MIT). Não há arquivo `LICENSE` neste repositório.
+Distribuído sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
 
 ## Skill: Busca Rápida no CloudTrail
 
