@@ -134,7 +134,7 @@ SEGMENTS.append(seg(r"aws\s+logs\s+(?:start-query|stop-query)"))
 # update-kubeconfig: grava apenas no kubeconfig local (~/.kube/config), sem
 # mutação de infraestrutura => liberado para permitir acesso de leitura ao cluster.
 SEGMENTS.append(seg(r"aws\s+eks\s+update-kubeconfig"))
-SEGMENTS.append(seg(r"aws\s+dynamodb\s+(?:query|scan)"))
+SEGMENTS.append(seg(r"aws\s+dynamodb\s+query"))
 SEGMENTS.append(seg(r"aws\s+s3\s+ls"))
 SEGMENTS.append(seg(r"aws\s+s3api\s+(?:list|get|head)-[\w-]+"))
 SEGMENTS.append(seg(r"aws\s+sts\s+(?:get-caller-identity|decode-authorization-message)"))
@@ -172,7 +172,9 @@ DENY_CORE = [
     r"truncate\s+[^\n]*/var/log",
     # escapes de ferramentas de leitura
     r"find\s+[^\n]*-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)\b",
-    r"awk\s+[^\n]*system\s*\(",
+    r"awk\s+[^\n]*(?:system\s*\(|\||\>|-f\b|getline)",
+    r"xxd\s+[^\n]*-r\b",
+    r"git\s+[^\n]*--(?:ext-cmd|exec-path|upload-pack)\b",
     r"(?:sort|jq)\s+[^\n]*(?:\s-o\s|--output[\s=])",
 ]
 
@@ -343,6 +345,12 @@ DENY_T = [
     "ls /tmp; sudo shutdown -h now",
     "cat /tmp/a $(rm -rf /tmp/b)",
     "grep x `rm -rf /tmp/y`",
+    "awk 'BEGIN { print \"rm -rf /\" | \"/bin/sh\" }'",
+    "awk 'BEGIN { \"/bin/id\" | getline out; print out }'",
+    "awk -f /tmp/malicious.awk",
+    "xxd -r -p hex.txt /bin/bash",
+    "git log --ext-diff",
+    "git diff --ext-cmd=rm",
 ]
 
 
