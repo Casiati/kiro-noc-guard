@@ -128,12 +128,17 @@ Cada regra vale no início do comando **e** depois de `;`, `&&` ou `|`, com ou s
 
 As ferramentas opcionais ausentes apenas deixam os padrões correspondentes inertes.
 
-## Instalação rápida
+### Instalação
 
 ```bash
 git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
+
+# Para Linux / macOS / Git Bash:
 ./install.sh
+
+# Para Windows nativo (PowerShell):
+.\install.ps1
 ```
 
 O instalador:
@@ -195,6 +200,7 @@ gerador e rodar a suíte — não relaxar a config à mão.
 ├── skills/                          # scripts adicionais (como a busca no CloudTrail)
 ├── steering/noc-readonly-first.md   # diretriz de comportamento (sempre no contexto)
 ├── install.sh                       # instalador idempotente, com backup
+├── install.ps1                      # instalador PowerShell (Windows nativo)
 ├── .gitignore
 └── README.md
 ```
@@ -247,7 +253,12 @@ The agent strictly enforces three levels of permissions using a generated config
 ```bash
 git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
+
+# For Linux / macOS / Git Bash:
 ./install.sh
+
+# For Windows (PowerShell):
+.\install.ps1
 ```
 
 ### Fast CloudTrail Search Skill
