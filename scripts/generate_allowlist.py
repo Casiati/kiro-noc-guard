@@ -24,11 +24,11 @@ import re
 import sys
 from pathlib import Path
 
-DEFAULT_AGENT = Path.home() / ".kiro/agents/noc-aws.json"
+DEFAULT_AGENT = Path.home() / ".kiro/agents/noc-guard.json"
 
 
 def agent_path(argv=None) -> Path:
-    """Caminho do agente: --agent CAMINHO, senão ~/.kiro/agents/noc-aws.json."""
+    """Caminho do agente: --agent CAMINHO, senao ~/.kiro/agents/noc-guard.json."""
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--agent" in argv:
         i = argv.index("--agent")
@@ -53,15 +53,24 @@ def seg(prefix: str) -> str:
 TEXT = ("cat", "zcat", "bzcat", "xzcat", "zgrep", "zegrep", "zdiff", "grep", "egrep",
         "fgrep", "rg", "tail", "head", "wc", "sort", "uniq", "cut", "tr", "nl",
         "column", "paste", "join", "comm", "diff", "jq", "yq", "awk", "less", "more",
-        "strings", "base64", "md5sum", "sha256sum", "xxd", "od")
-FS = ("ls", "ll", "stat", "file", "readlink", "realpath", "basename", "dirname",
-      "tree", "du", "df", "mount", "lsblk", "findmnt", "find")
+        "strings", "base64", "md5sum", "sha256sum", "xxd", "od", "findstr", "Select-String",
+        "sls", "Get-Content", "Measure-Object", "Sort-Object", "Get-Unique", "Select-Object",
+        "select", "Format-Table", "ft", "Format-List", "fl", "Out-String", "Compare-Object", "type")
+FS = ("ls", "ll", "dir", "stat", "file", "readlink", "realpath", "basename", "dirname",
+      "tree", "du", "df", "mount", "lsblk", "findmnt", "find",
+      "Get-ChildItem", "gci", "Get-Item", "Get-ItemProperty", "Test-Path", "Resolve-Path",
+      "Get-Volume", "Get-Disk", "pwd", "Get-Location")
 SYS = ("uptime", "date", "whoami", "id", "hostname", "uname", "lscpu", "nproc",
        "free", "vmstat", "iostat", "mpstat", "sar", "dmesg", "last", "w", "who",
-       "printenv", "echo", "which", "type", "command -v", "sleep")
-PROC = ("ps", "pgrep", "pidof", "lsof", "ss", "netstat", "iotop -b", "top -b", "pstree")
+       "printenv", "echo", "which", "where", "type", "command -v", "sleep",
+       "Get-Date", "systeminfo", "Get-ComputerInfo", "Get-WmiObject", "gwmi", "Get-CimInstance",
+       "Write-Output", "Get-Command", "gcm", "Start-Sleep")
+PROC = ("ps", "pgrep", "pidof", "lsof", "ss", "netstat", "iotop -b", "top -b", "pstree",
+        "tasklist", "Get-Process", "gps", "Get-NetTCPConnection", "Get-NetUDPEndpoint")
 NET = ("dig", "nslookup", "host", "getent", "traceroute", "tracepath", "whois",
-       "openssl x509", "nc -z", "wget --spider")
+       "openssl x509", "nc -z", "wget --spider",
+       "Test-NetConnection", "tnc", "tracert", "Resolve-DnsName", "ipconfig",
+       "Get-NetIPAddress", "Get-NetAdapter", "arp", "route print")
 
 SEGMENTS: list[str] = []
 for c in TEXT + FS + SYS + PROC + NET:
@@ -102,7 +111,7 @@ KUBECTL_GFLAG = (
     r")"
 )
 KUBECTL_READ = (r"(?:get|describe|logs|top|version|explain|api-resources|"
-                r"api-versions|cluster-info|config\s+view)")
+                r"api-versions|cluster-info|config\s+view|config\s+get-contexts|config\s+current-context)")
 SEGMENTS.append(seg(rf"kubectl(?:\s+{KUBECTL_GFLAG})*\s+{KUBECTL_READ}"))
 SEGMENTS.append(seg(r"crontab\s+-l"))
 SEGMENTS.append(seg(r"nginx\s+-[tTV]"))
@@ -240,6 +249,9 @@ AUTO = [
     "aws s3api head-object --bucket b --key k --profile EXAMPLE-NOC",
     "aws sts get-caller-identity --profile EXAMPLE-NOC",
     "aws ce get-cost-and-usage --time-period Start=2026-09-01,End=2026-09-22 --profile EXAMPLE-NOC",
+    "Get-ChildItem -Path C:\\logs | Select-String -Pattern 'error'",
+    "ipconfig /all | findstr DNS",
+    "Get-Process | Sort-Object CPU -Descending | Select-Object -First 10",
     "aws cloudtrail lookup-events --max-results 10 --profile EXAMPLE-NOC",
     "aws dynamodb query --table-name t --key-condition-expression 'pk = :p' --profile EXAMPLE-NOC",
     "aws ecs describe-services --cluster c --services s --profile EXAMPLE-NOC",
