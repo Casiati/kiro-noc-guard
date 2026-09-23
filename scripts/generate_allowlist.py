@@ -172,9 +172,9 @@ DENY_CORE = [
     r"truncate\s+[^\n]*/var/log",
     # escapes de ferramentas de leitura
     r"find\s+[^\n]*-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)\b",
-    r"awk\s+[^\n]*(?:system\s*\(|\||\>|-f\b|getline)",
-    r"xxd\s+[^\n]*-r\b",
-    r"git\s+[^\n]*--(?:ext-cmd|exec-path|upload-pack)\b",
+    r"awk\s+[^\n]*(?:system\s*\(|-f\b|getline|\|\s*\"|\>\s*\")",
+    r"xxd\s+[^;&|><\n]*-r\b",
+    r"git\s+[^;&|><\n]*--(?:ext-cmd|ext-diff|exec-path|upload-pack)\b",
     r"(?:sort|jq)\s+[^\n]*(?:\s-o\s|--output[\s=])",
 ]
 
