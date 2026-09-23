@@ -371,25 +371,25 @@ def run_tests():
             got = classify(cmd, allowed, denied)
             if got != expected:
                 fails += 1
-                print(f"FAIL  esperado={expected:6} obtido={got:6} | {cmd}")
+                print(f"FAIL  expected={expected:6} got={got:6} | {cmd}")
     total = len(AUTO) + len(PROMPT) + len(DENY_T)
-    print(f"testes: {total}  falhas: {fails}  "
-          f"(padroes: {len(ALLOWED)} allow / {len(DENY)} deny)")
+    print(f"tests: {total}  fails: {fails}  "
+          f"(patterns: {len(ALLOWED)} allow / {len(DENY)} deny)")
     return fails == 0
 
 
 def apply_to_agent(agent: Path):
     if not agent.is_file():
-        sys.exit(f"erro: agente não encontrado em {agent}\n"
-                 f"instale o template primeiro (veja install.sh) ou use --agent CAMINHO")
+        sys.exit(f"error: agent not found at {agent}\n"
+                 f"install the template first (see install.sh) or use --agent PATH")
     cfg = json.loads(agent.read_text())
     shell = cfg.setdefault("toolsSettings", {}).setdefault("shell", {})
     shell["allowedCommands"] = ALLOWED
     shell["deniedCommands"] = DENY
-    shell["autoAllowReadonly"] = False   # allowlist explícito é a única fonte de verdade
-    shell["denyByDefault"] = False       # não-listado => pede confirmação (não bloqueia)
+    shell["autoAllowReadonly"] = False   # explicit allowlist is the single source of truth
+    shell["denyByDefault"] = False       # unlisted => prompts for confirmation (does not block)
     agent.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
-    print(f"aplicado em {agent}")
+    print(f"applied to {agent}")
 
 
 if __name__ == "__main__":

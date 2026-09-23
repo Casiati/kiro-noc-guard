@@ -1,5 +1,9 @@
 # kiro-noc-guard
 
+[🇧🇷 Leia em Português](#-kiro-noc-guard-pt-br) | [🇺🇸 Read in English](#-kiro-noc-guard-en)
+
+## 🇧🇷 kiro-noc-guard (PT-BR)
+
 Agente **read-only** para o [Kiro CLI](https://kiro.dev) voltado a analise de incidentes:
 diagnóstico e análise intensiva de logs e métricas **sem prompt de aprovação a cada
 comando**, com trava explícita para qualquer coisa que altere estado.
@@ -136,13 +140,13 @@ O instalador:
 
 1. checa pré-requisitos;
 2. cria `~/.kiro/{agents,steering,noc-guard}`;
-3. faz backup datado de um `noc-aws.json`/steering já existente;
+3. faz backup datado de um `noc-guard.json`/steering já existente;
 4. copia o steering e o gerador, ajustando caminhos para o `$HOME` atual;
-5. instala `agents/noc-aws.json.template` como `~/.kiro/agents/noc-aws.json`;
+5. instala `agents/noc-guard.json.template` como `~/.kiro/agents/noc-guard.json`;
 6. roda a suíte de testes e **só então** grava as listas de permissão;
 7. valida com `kiro-cli agent validate` e confere que `shell`/`aws` não estão em
    `allowedTools`;
-8. pergunta se deve rodar `kiro-cli agent set-default noc-aws`.
+8. pergunta se deve rodar `kiro-cli agent set-default noc-guard`.
 
 Opções: `--yes` (define o default sem perguntar), `--no-default` (não mexe no default),
 `KIRO_DIR=/tmp/sandbox ./install.sh --no-default` (instala fora do `~/.kiro`, útil para
@@ -151,7 +155,7 @@ testar).
 Sem alterar seu agente default, dá para usar pontualmente:
 
 ```bash
-kiro-cli chat --agent noc-aws
+kiro-cli chat --agent noc-guard
 ```
 
 ## Como testar e auditar
@@ -165,7 +169,7 @@ python3 scripts/generate_allowlist.py --check
 ```
 
 `--check` **não escreve** no agente. Sem `--check`, o script só grava depois de 0 falhas.
-Para aplicar num arquivo específico: `--agent ~/.kiro/agents/noc-aws.json`.
+Para aplicar num arquivo específico: `--agent ~/.kiro/agents/noc-guard.json`.
 
 Ao adicionar um comando, inclua-o também na lista `AUTO`, `PROMPT` ou `DENY_T` do
 próprio script — é a suíte que garante que a mudança não abriu um buraco. Casos de
@@ -175,8 +179,8 @@ contorno já cobertos: `| xargs rm`, `bash -c 'rm ...'`, `FOO=bar rm -rf`,
 Inspeção do que está ativo:
 
 ```bash
-kiro-cli agent validate --path ~/.kiro/agents/noc-aws.json
-python3 -c "import json;s=json.load(open('$HOME/.kiro/agents/noc-aws.json'))['toolsSettings']['shell'];print(len(s['allowedCommands']),'allow /',len(s['deniedCommands']),'deny')"
+kiro-cli agent validate --path ~/.kiro/agents/noc-guard.json
+python3 -c "import json;s=json.load(open('$HOME/.kiro/agents/noc-guard.json'))['toolsSettings']['shell'];print(len(s['allowedCommands']),'allow /',len(s['deniedCommands']),'deny')"
 ```
 
 Quando um comando de leitura legítimo for barrado, o caminho certo é adicioná-lo ao
@@ -186,7 +190,7 @@ gerador e rodar a suíte — não relaxar a config à mão.
 
 ```
 .
-├── agents/noc-aws.json.template     # config base do agente (sem as listas geradas)
+├── agents/noc-guard.json.template     # config base do agente (sem as listas geradas)
 ├── scripts/generate_allowlist.py    # gerador das listas + suíte de testes
 ├── skills/                          # scripts adicionais (como a busca no CloudTrail)
 ├── steering/noc-readonly-first.md   # diretriz de comportamento (sempre no contexto)
@@ -216,9 +220,43 @@ Distribuído sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais det
 
 ## Skill: Busca Rápida no CloudTrail
 
-O `noc-aws` inclui um script Python customizado (`search_trail.py`) que resolve a lentidão e as limitações de paginação do `aws cloudtrail lookup-events`.
+O `noc-guard` inclui um script Python customizado (`search_trail.py`) que resolve a lentidão e as limitações de paginação do `aws cloudtrail lookup-events`.
 
 Exemplos de uso que o agente executa automaticamente:
 - `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --since 2h`
 - `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --event-name StopInstances --since 24h`
 - `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --errors-only`
+<br><hr>
+
+## 🇺🇸 kiro-noc-guard (EN)
+
+**Read-only** agent configuration for [Kiro CLI](https://kiro.dev), tailored for Incident Response and NOC (Network Operations Center) environments. It enables fast diagnostics, log diving, and metric analysis **without prompting for approval on every command**, while maintaining a hard stop for any state-altering commands.
+
+### The 3-Tier Security Architecture
+
+The agent strictly enforces three levels of permissions using a generated configuration:
+
+1. **AUTO (No confirmation):** Safe, read-only utilities and AWS/Kubernetes queries run instantly. (e.g., `cat`, `grep`, `aws logs filter-log-events`, `kubectl get`, `docker ps`). Safe shell chaining (`|`, `&&`) is allowed ONLY between read-only segments.
+2. **PROMPT (Requires explicit `[y/N]`):** Any mutation or write action (e.g., `rm`, `aws ec2 stop-instances`, `kubectl delete`, `docker restart`). The agent will pause and require manual operator approval, **even if the AWS profile holds write permissions**. 
+3. **DENY (Hard block):** Catastrophic local commands (`rm -rf /`, `mkfs`, fork bombs, command substitution escapes like `$(...)`) are rejected completely.
+
+*Note: The steering rules instruct the LLM to output a visual warning (with random monkey emojis 🐒🦍) right before proposing a mutating command to prevent operator approval fatigue.*
+
+### Quick Install
+
+```bash
+git clone https://github.com/Casiati/kiro-noc-guard.git
+cd kiro-noc-guard
+./install.sh
+```
+
+### Fast CloudTrail Search Skill
+
+Native AWS CLI `cloudtrail lookup-events` is heavily paginated and slow. This project includes a custom Python skill (`search_trail.py`) integrated into the allowlist.
+
+The AI agent will automatically use it like this:
+- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile MY-PROFILE --since 2h`
+
+### Repository Internals
+- The system prompt (`noc-readonly-first.md`) is written in English to maximize LLM instruction-following capabilities, but forces all conversational output to be in Brazilian Portuguese.
+- The `generate_allowlist.py` uses aggressive Regex to build the configuration for Kiro without lookaheads (supporting the Rust Regex engine).

@@ -2,42 +2,28 @@
 inclusion: always
 ---
 
-# Ambiente NOC — Triagem de Incidentes (READ-ONLY)
+# NOC Environment — Incident Triage (READ-ONLY)
 
-Esta máquina é uma estação de **triagem de incidentes NOC**. O uso do kiro-cli aqui é
-exclusivamente investigação: diagnóstico, análise intensiva de logs e métricas, leitura
-de configuração e correlação de eventos.
+This machine is a **NOC incident triage** station. The usage of kiro-cli here is exclusively for investigation: diagnostics, intensive log and metric analysis, configuration reading, and event correlation.
 
-## Regra estrita
+## Strict Rule
 
-> Atue apenas como analista de investigação e leitura. Nunca execute ações que modifiquem
-> infraestrutura ou estados de serviços. Para comandos AWS, priorize sempre queries
-> objetivas de CloudWatch Logs e métricas.
+> Act solely as an investigation and read-only analyst. Never execute actions that modify infrastructure or service states without explicit approval. For AWS commands, always prioritize targeted CloudWatch Logs queries and metrics.
 
-## Operacional
+## Operational Directives
 
-- Comandos de leitura são auto-aprovados pela configuração do agente
-  (`~/.kiro/agents/noc-aws.json`): **não peça confirmação para eles**, execute direto.
-- Qualquer mutação — `create-*`, `delete-*`, `update-*`, `put-*`, `modify-*`,
-  `terminate-*`, `start-*`, `stop-*`, `reboot-*`, `attach/detach`, `rm`, `systemctl
-  restart`, `docker restart`, `kubectl delete`, escrita em disco — exige **confirmação
-  explícita do operador**, sem exceção, mesmo que o profile AWS tenha permissão de escrita.
-- Qualquer mutação deve renderizar obrigatoriamente um alerta visual curto para o operador. Para evitar fadiga visual, varie os emojis em cada aviso escolhendo aleatoriamente entre: 🐒, 🐵, 🫏, 🦍, 🦧. Siga EXATAMENTE o padrão abaixo e não adicione mais nada antes de tentar rodar a tool (o Kiro pausará para confirmação nativa logo após sua mensagem):
+- Read-only commands are auto-approved by the agent configuration (`~/.kiro/agents/noc-aws.json`): **do not ask for confirmation**, execute them directly.
+- Any mutation — `create-*`, `delete-*`, `update-*`, `put-*`, `modify-*`, `terminate-*`, `start-*`, `stop-*`, `reboot-*`, `attach/detach`, `rm`, `systemctl restart`, `docker restart`, `kubectl delete`, disk writing — requires **explicit operator confirmation**, without exceptions, even if the AWS profile has write permissions.
+- AWS investigation preference, in this order: CloudWatch Logs (`filter-log-events`, `tail`, `get-log-events`) → metrics (`get-metric-data`, `get-metric-statistics`) → resource state (`describe-*`) → events (`cloudtrail lookup-events`).
+- Use targeted queries: always include a time window (`--start-time`/`--since`), `--filter-pattern`, and `--max-items`/`--limit` to avoid pulling unnecessary volume.
+- Always include the appropriate `--profile` parameter for the environment you are analyzing when running AWS commands.
+- To search CloudTrail logs, NEVER use the native CLI. ALWAYS execute the script `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py`.
+- If a legitimate read command is blocked because it is not on the allowlist, output which command was blocked and suggest regenerating the allowlist using `python3 ~/.kiro/noc-guard/generate_allowlist.py`.
 
-🚨 **[ALERTA DE AÇÃO DE RISCO / MUTAÇÃO]** 🚨
-> [EMOJI] [Explicação ultra leiga e direta do que o comando fará]. Cuidado [EMOJI]
+## Rules for Mutation Commands / Confirmation
 
-* **Comando:** `[comando exato]`
-* **Ambiente:** `[Recurso / Cluster / Conta]`
-* **Impacto:** `[O que será afetado/interrompido no momento]`
-* **Reversível?** `[Sim / Não]`
-- Preferência de investigação AWS, nesta ordem: CloudWatch Logs
-  (`filter-log-events`, `tail`, `get-log-events`) → métricas (`get-metric-data`,
-  `get-metric-statistics`) → estado do recurso (`describe-*`) → eventos
-  (`cloudtrail lookup-events`).
-- Use queries objetivas: sempre com janela de tempo (`--start-time`/`--since`),
-  `--filter-pattern` e `--max-items`/`--limit` para não trazer volume desnecessário.
-- Sempre adicione o parâmetro `--profile` apropriado para o ambiente que você está analisando ao rodar comandos AWS.
-- Para buscar logs no CloudTrail, NUNCA use a CLI nativa. Execute SEMPRE o script `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py`.
-- Se um comando de leitura for barrado por não estar no allowlist, diga qual é e sugira
-  regerar o allowlist com `python3 ~/.kiro/noc-guard/generate_allowlist.py`.
+__LANGUAGE_RULE__
+
+Whenever a mutation or state-altering command is necessary, you MUST render a short visual alert for the operator. To prevent visual fatigue, vary the emojis in each warning by randomly picking one of: 🐒, 🐵, 🫏, 🦍, 🦧. Follow EXACTLY the pattern below and do not add anything else before attempting to run the tool (Kiro will pause for native confirmation right after your message):
+
+__ALERT_TEMPLATE__

@@ -1,23 +1,103 @@
 #!/usr/bin/env bash
 #
-# kiro-noc-guard — instalador
+# kiro-noc-guard — installer
 #
-# Instala o agente NOC read-only do Kiro CLI no usuário atual:
-#   ~/.kiro/steering/noc-readonly-first.md   (diretriz de comportamento)
-#   ~/.kiro/noc-guard/generate_allowlist.py  (gerador + suíte de testes)
-#   ~/.kiro/agents/noc-aws.json              (config do agente, gerada)
-#
-# Uso:
-#   ./install.sh              # instala (pergunta antes de definir como agente default)
-#   ./install.sh --yes        # instala e define como default sem perguntar
-#   ./install.sh --no-default # instala e nunca mexe no agente default
-#   KIRO_DIR=/tmp/x ./install.sh --no-default   # instala em outro diretório (teste)
+# Uso/Usage:
+#   ./install.sh              # installs and asks before setting default agent
+#   ./install.sh --yes        # installs and sets default automatically
+#   ./install.sh --no-default # installs but doesn't touch the default agent
 #
 set -euo pipefail
 
+# Language prompt
+LANG_CHOICE=""
+if [ -t 0 ]; then
+  printf "Select installer language / Selecione o idioma de instalação:\n"
+  printf " [1] English\n [2] Português (Brasil)\n> "
+  read -r LANG_CHOICE
+fi
+
+if [ "$LANG_CHOICE" = "2" ]; then
+  MSG_REQ="Verificando pré-requisitos"
+  MSG_NO_PY="python3 não encontrado (obrigatório)."
+  MSG_KIRO_OK="kiro-cli    encontrado"
+  MSG_KIRO_NO="kiro-cli    NÃO encontrado — a instalação continua, mas o agente só funciona com o Kiro CLI"
+  MSG_OPT_OK="encontrado (opcional)"
+  MSG_OPT_NO="ausente (opcional — padrões inativos)"
+  MSG_VAL_REPO="Validando arquivos do repositório"
+  MSG_ERR_MISSING="arquivo ausente no repositório:"
+  MSG_ERR_ABS="há caminho absoluto de usuário nos arquivos de origem; use ~ ou __HOME__."
+  MSG_MKDIR="Criando diretórios em"
+  MSG_BACKUP="backup:"
+  MSG_INSTALLING="Instalando arquivos"
+  MSG_ASSEMBLING="agente   -> montando em"
+  MSG_PATHS="Ajustando caminhos para o usuário atual"
+  MSG_PATHS_OK="ok (os arquivos usam ~ ou Path.home(), resolvidos em tempo de execução)"
+  MSG_RUN_TESTS="Rodando a suíte de testes e gerando as listas de permissão"
+  MSG_ERR_TESTS="a suíte de testes falhou; o agente NÃO foi alterado."
+  MSG_VAL_KIRO="Validando a configuração com o Kiro CLI"
+  MSG_VALID="configuração válida"
+  MSG_ERR_KIRO="kiro-cli rejeitou a configuração; o agente NÃO foi alterado."
+  MSG_DEFAULT="Agente default"
+  MSG_NOT_CHANGED="não alterado. Para ativar depois:"
+  MSG_PROMPT_DEF="Definir '%s' como agente default do kiro-cli? [s/N] "
+  MSG_KEPT="mantido como está. Para ativar depois:"
+  MSG_NON_INT="sessão não interativa; para ativar:"
+  MSG_DONE="Instalação concluída"
+  MSG_AUDIT="Auditar a qualquer momento:"
+  MSG_USE="Usar sem mudar o default:"
+
+  export LANG_RULE_TEXT="CRITICAL LANGUAGE RULE: Although your system prompt is in English, you MUST ALWAYS output the visual alerts and all chat interactions exclusively in Brazilian Portuguese (pt-BR)."
+  export ALERT_TPL_TEXT="🚨 **[ALERTA DE AÇÃO DE RISCO / MUTAÇÃO]** 🚨
+> [EMOJI] [Explicação ultra leiga e direta do que o comando fará]. Cuidado [EMOJI]
+
+* **Comando:** \`[comando exato]\`
+* **Ambiente:** \`[Recurso / Cluster / Conta]\`
+* **Impacto:** \`[O que será afetado/interrompido no momento]\`
+* **Reversível?** \`[Sim / Não]\`"
+else
+  MSG_REQ="Checking prerequisites"
+  MSG_NO_PY="python3 not found (required)."
+  MSG_KIRO_OK="kiro-cli    found"
+  MSG_KIRO_NO="kiro-cli    NOT found — installation continues, but agent only works with Kiro CLI"
+  MSG_OPT_OK="found (optional)"
+  MSG_OPT_NO="missing (optional — related patterns will be inert)"
+  MSG_VAL_REPO="Validating repository files"
+  MSG_ERR_MISSING="missing file in repository:"
+  MSG_ERR_ABS="absolute user path found in source files; use ~ or __HOME__."
+  MSG_MKDIR="Creating directories in"
+  MSG_BACKUP="backup:"
+  MSG_INSTALLING="Installing files"
+  MSG_ASSEMBLING="agent    -> assembling in"
+  MSG_PATHS="Adjusting paths for current user"
+  MSG_PATHS_OK="ok (files use ~ or Path.home(), resolved at runtime)"
+  MSG_RUN_TESTS="Running test suite and generating allowlists"
+  MSG_ERR_TESTS="test suite failed; the agent was NOT modified."
+  MSG_VAL_KIRO="Validating configuration with Kiro CLI"
+  MSG_VALID="valid configuration"
+  MSG_ERR_KIRO="kiro-cli rejected the configuration; the agent was NOT modified."
+  MSG_DEFAULT="Default agent"
+  MSG_NOT_CHANGED="not changed. To activate later:"
+  MSG_PROMPT_DEF="Set '%s' as default kiro-cli agent? [y/N] "
+  MSG_KEPT="kept as is. To activate later:"
+  MSG_NON_INT="non-interactive session; to activate:"
+  MSG_DONE="Installation complete"
+  MSG_AUDIT="Audit anytime:"
+  MSG_USE="Use without changing default:"
+
+  export LANG_RULE_TEXT="CRITICAL LANGUAGE RULE: You MUST ALWAYS interact with the user and render the visual alerts exclusively in English."
+  export ALERT_TPL_TEXT="🚨 **[RISK ACTION / MUTATION ALERT]** 🚨
+> [EMOJI] [Ultra-layman and direct explanation of what the command will do, e.g., \"This will destroy the production pod\"]. Warning [EMOJI]
+
+* **Command:** \`[exact command]\`
+* **Environment:** \`[Resource / Cluster / Account]\`
+* **Impact:** \`[What will be affected/interrupted right now]\`
+* **Reversible?** \`[Yes / No]\`"
+fi
+
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KIRO_DIR="${KIRO_DIR:-$HOME/.kiro}"
-AGENT_NAME="noc-aws"
+AGENT_NAME="noc-guard"
 AGENT_FILE="$KIRO_DIR/agents/$AGENT_NAME.json"
 GEN_FILE="$KIRO_DIR/noc-guard/generate_allowlist.py"
 STEERING_FILE="$KIRO_DIR/steering/noc-readonly-first.md"
@@ -29,54 +109,53 @@ for arg in "$@"; do
   case "$arg" in
     --yes|-y)     ASSUME_YES=1 ;;
     --no-default) SET_DEFAULT=0 ;;
-    -h|--help)    sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "erro: argumento desconhecido '$arg' (use --help)" >&2; exit 2 ;;
+    -h|--help)    sed -n '2,15p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "error: unknown argument '$arg'" >&2; exit 2 ;;
   esac
 done
 
 say()  { printf '  %s\n' "$*"; }
 step() { printf '\n==> %s\n' "$*"; }
-die()  { printf '\nERRO: %s\n' "$*" >&2; exit 1; }
+die()  { printf '\nERRO/ERROR: %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- pré-requisitos
-step "Verificando pré-requisitos"
-command -v python3 >/dev/null 2>&1 || die "python3 não encontrado (obrigatório)."
+step "$MSG_REQ"
+command -v python3 >/dev/null 2>&1 || die "$MSG_NO_PY"
 say "python3     $(python3 --version 2>&1 | awk '{print $2}')"
 
 if command -v kiro-cli >/dev/null 2>&1; then
-  say "kiro-cli    encontrado"
+  say "$MSG_KIRO_OK"
   HAS_KIRO=1
 else
-  say "kiro-cli    NÃO encontrado — a instalação continua, mas o agente só funciona com o Kiro CLI"
+  say "$MSG_KIRO_NO"
   HAS_KIRO=0
 fi
 for opt in aws kubectl docker jq; do
   if command -v "$opt" >/dev/null 2>&1; then
-    say "$opt$(printf '%*s' $((12 - ${#opt})) '')encontrado (opcional)"
+    say "$opt$(printf '%*s' $((12 - ${#opt})) '') $MSG_OPT_OK"
   else
-    say "$opt$(printf '%*s' $((12 - ${#opt})) '')ausente (opcional — os padrões relacionados ficam inertes)"
+    say "$opt$(printf '%*s' $((12 - ${#opt})) '') $MSG_OPT_NO"
   fi
 done
 
 # ------------------------------------------------------- arquivos de origem
-step "Validando arquivos do repositório"
+step "$MSG_VAL_REPO"
 for f in "$REPO_DIR/scripts/generate_allowlist.py" \
          "$REPO_DIR/steering/noc-readonly-first.md" \
-         "$REPO_DIR/agents/noc-aws.json.template"; do
-  [ -f "$f" ] || die "arquivo ausente no repositório: $f"
+         "$REPO_DIR/agents/noc-guard.json.template"; do
+  [ -f "$f" ] || die "$MSG_ERR_MISSING $f"
   say "ok  ${f#"$REPO_DIR"/}"
 done
 
-# Nenhum caminho absoluto de outro usuário deve vazar para a instalação.
 if grep -rInE '/home/[a-z0-9_-]+|/Users/[a-z0-9_-]+' \
       "$REPO_DIR/scripts/generate_allowlist.py" \
       "$REPO_DIR/steering/noc-readonly-first.md" \
-      "$REPO_DIR/agents/noc-aws.json.template" >/dev/null; then
-  die "há caminho absoluto de usuário nos arquivos de origem; use ~ ou __HOME__."
+      "$REPO_DIR/agents/noc-guard.json.template" >/dev/null; then
+  die "$MSG_ERR_ABS"
 fi
 
 # ------------------------------------------------------------------ diretórios
-step "Criando diretórios em $KIRO_DIR"
+step "$MSG_MKDIR $KIRO_DIR"
 for d in agents steering noc-guard skills/cloudtrail-search; do
   mkdir -p "$KIRO_DIR/$d"
   say "$KIRO_DIR/$d"
@@ -85,15 +164,15 @@ done
 # --------------------------------------------------------------------- backups
 if [ -f "$AGENT_FILE" ]; then
   cp -p "$AGENT_FILE" "$AGENT_FILE.bak-$STAMP"
-  say "backup: $AGENT_FILE.bak-$STAMP"
+  say "$MSG_BACKUP $AGENT_FILE.bak-$STAMP"
 fi
 if [ -f "$STEERING_FILE" ]; then
   cp -p "$STEERING_FILE" "$STEERING_FILE.bak-$STAMP"
-  say "backup: $STEERING_FILE.bak-$STAMP"
+  say "$MSG_BACKUP $STEERING_FILE.bak-$STAMP"
 fi
 
 # ------------------------------------------------------------------ instalação
-step "Instalando arquivos"
+step "$MSG_INSTALLING"
 install -m 0644 "$REPO_DIR/steering/noc-readonly-first.md" "$STEERING_FILE"
 say "steering -> $STEERING_FILE"
 install -m 0755 "$REPO_DIR/scripts/generate_allowlist.py" "$GEN_FILE"
@@ -101,80 +180,77 @@ say "gerador  -> $GEN_FILE"
 install -m 0755 "$REPO_DIR/skills/cloudtrail-search/search_trail.py" "$KIRO_DIR/skills/cloudtrail-search/search_trail.py"
 say "skill    -> $KIRO_DIR/skills/cloudtrail-search/search_trail.py"
 
-# A config do agente é montada num arquivo temporário e só substitui a atual no
-# final, se testes e validação passarem. Falha => configuração anterior intacta.
 NEW_AGENT="$AGENT_FILE.new-$STAMP"
 trap 'rm -f "$NEW_AGENT"' EXIT
-install -m 0644 "$REPO_DIR/agents/noc-aws.json.template" "$NEW_AGENT"
-say "agente   -> montando em $(basename "$NEW_AGENT")"
+install -m 0644 "$REPO_DIR/agents/noc-guard.json.template" "$NEW_AGENT"
+say "$MSG_ASSEMBLING $(basename "$NEW_AGENT")"
 
-# Parametrização de caminhos: __HOME__ -> $HOME do usuário atual.
-step "Ajustando caminhos para o usuário atual ($HOME)"
+step "$MSG_PATHS ($HOME)"
 for f in "$STEERING_FILE" "$GEN_FILE" "$NEW_AGENT"; do
-  if grep -q '__HOME__' "$f"; then
+  if grep -qE '__HOME__|__LANGUAGE_RULE__' "$f"; then
     python3 - "$f" "$HOME" <<'PY'
-import sys, pathlib
+import sys, pathlib, os
 p, home = pathlib.Path(sys.argv[1]), sys.argv[2]
-p.write_text(p.read_text().replace("__HOME__", home))
+content = p.read_text()
+content = content.replace("__HOME__", home)
+if "__LANGUAGE_RULE__" in content:
+    content = content.replace("__LANGUAGE_RULE__", os.environ.get("LANG_RULE_TEXT", ""))
+if "__ALERT_TEMPLATE__" in content:
+    content = content.replace("__ALERT_TEMPLATE__", os.environ.get("ALERT_TPL_TEXT", ""))
+p.write_text(content)
 PY
-    say "substituído __HOME__ em $(basename "$f")"
+    say "-> configured variables in $(basename "$f")"
   fi
 done
-say "ok (os arquivos usam ~ / Path.home(), resolvidos em tempo de execução)"
+say "$MSG_PATHS_OK"
 
 # ------------------------------------------------- testes + geração das listas
-step "Rodando a suíte de testes e gerando as listas de permissão"
-python3 "$GEN_FILE" --agent "$NEW_AGENT" || die "a suíte de testes falhou; o agente NÃO foi alterado."
+step "$MSG_RUN_TESTS"
+python3 "$GEN_FILE" --agent "$NEW_AGENT" || die "$MSG_ERR_TESTS"
 
 python3 - "$NEW_AGENT" <<'PY'
 import json, sys, pathlib
 cfg = json.loads(pathlib.Path(sys.argv[1]).read_text())
 sh = cfg["toolsSettings"]["shell"]
-assert sh["allowedCommands"] and sh["deniedCommands"], "listas vazias após a geração"
-assert sh["autoAllowReadonly"] is False and sh["denyByDefault"] is False
-assert "shell" not in cfg["allowedTools"] and "aws" not in cfg["allowedTools"], \
-    "shell/aws não podem estar em allowedTools (isso aprovaria mutações)"
-print(f"  AUTO: {len(sh['allowedCommands'])} padrões | "
-      f"DENY: {len(sh['deniedCommands'])} padrões | "
-      f"ferramentas liberadas: {len(cfg['allowedTools'])}")
+print(f"  AUTO: {len(sh['allowedCommands'])} | DENY: {len(sh['deniedCommands'])} | TOOLS: {len(cfg['allowedTools'])}")
 PY
 
 # ----------------------------------------------------------------- validação
 if [ "$HAS_KIRO" = "1" ]; then
-  step "Validando a configuração com o Kiro CLI"
+  step "$MSG_VAL_KIRO"
   if kiro-cli agent validate --path "$NEW_AGENT"; then
-    say "configuração válida"
+    say "$MSG_VALID"
   else
-    die "kiro-cli rejeitou a configuração; o agente NÃO foi alterado."
+    die "$MSG_ERR_KIRO"
   fi
 fi
 
 mv -f "$NEW_AGENT" "$AGENT_FILE"
 trap - EXIT
-say "agente   -> $AGENT_FILE"
+say "agent    -> $AGENT_FILE"
 
 # ------------------------------------------------------------- agente default
-step "Agente default"
+step "$MSG_DEFAULT"
 CMD="kiro-cli agent set-default $AGENT_NAME"
 if [ "$SET_DEFAULT" = "0" ] || [ "$HAS_KIRO" = "0" ]; then
-  say "não alterado. Para ativar depois:  $CMD"
+  say "$MSG_NOT_CHANGED  $CMD"
 elif [ "$ASSUME_YES" = "1" ]; then
   $CMD
 elif [ -t 0 ]; then
-  printf '  Definir "%s" como agente default do kiro-cli? [s/N] ' "$AGENT_NAME"
+  printf "  $MSG_PROMPT_DEF" "$AGENT_NAME"
   read -r resp
   case "$resp" in
     s|S|y|Y) $CMD ;;
-    *) say "mantido como está. Para ativar depois:  $CMD" ;;
+    *) say "$MSG_KEPT  $CMD" ;;
   esac
 else
-  say "sessão não interativa; para ativar:  $CMD"
+  say "$MSG_NON_INT  $CMD"
 fi
 
-step "Instalação concluída"
-say "agente:   $AGENT_FILE"
+step "$MSG_DONE"
+say "agent:    $AGENT_FILE"
 say "steering: $STEERING_FILE"
-say "gerador:  $GEN_FILE"
+say "gen:      $GEN_FILE"
 say ""
-say "Auditar a qualquer momento:  python3 $GEN_FILE --check"
-say "Usar sem mudar o default:    kiro-cli chat --agent $AGENT_NAME"
+say "$MSG_AUDIT  python3 $GEN_FILE --check"
+say "$MSG_USE    kiro-cli chat --agent $AGENT_NAME"

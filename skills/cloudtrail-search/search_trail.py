@@ -22,7 +22,7 @@ def parse_time(since_str):
     try:
         val = int(since_str[:-1])
     except ValueError:
-        raise ValueError("Formato de tempo invalido. Use um numero seguido de m, h ou d (ex: 30m, 1h, 7d)")
+        raise ValueError("Invalid time format. Use a number followed by m, h, or d (e.g., 30m, 1h, 7d)")
     
     if unit == 'h':
         return datetime.utcnow() - timedelta(hours=val)
@@ -31,14 +31,14 @@ def parse_time(since_str):
     elif unit == 'm':
         return datetime.utcnow() - timedelta(minutes=val)
     else:
-        raise ValueError("Unidade de tempo invalida. Use m (minutos), h (horas) ou d (dias).")
+        raise ValueError("Invalid time unit. Use m (minutes), h (hours), or d (days).")
 
 def run():
     args = parse_args()
     try:
         start_time = parse_time(args.since)
     except ValueError as e:
-        print(f"Erro: {e}")
+        print(f"Error: {e}")
         sys.exit(1)
 
     session = boto3.Session(profile_name=args.profile, region_name=args.region)
@@ -53,7 +53,7 @@ def run():
         lookup_attrs.append({'AttributeKey': 'ResourceName', 'AttributeValue': args.resource_name})
     
     if len(lookup_attrs) > 1:
-        print("Erro: A API lookup_events do AWS CloudTrail suporta filtro por apenas UM atributo de cada vez (EventName, Username OU ResourceName).")
+        print("Error: AWS CloudTrail lookup_events API supports filtering by only ONE attribute at a time (EventName, Username, OR ResourceName).")
         sys.exit(1)
 
     kwargs = {'StartTime': start_time}
@@ -62,7 +62,7 @@ def run():
 
     paginator = client.get_paginator('lookup_events')
     
-    print(f"{'Hora (UTC)':<20} | {'Usuario':<25} | {'Acao':<30} | {'Recurso':<30} | {'Status/Erro':<20} | {'IP'}")
+    print(f"{'Time (UTC)':<20} | {'User':<25} | {'Action':<30} | {'Resource':<30} | {'Status/Error':<20} | {'IP'}")
     print("-" * 150)
     
     count = 0
@@ -93,13 +93,13 @@ def run():
                 print(f"{time_str:<20} | {user_str:<25} | {action_str:<30} | {res_str:<30} | {status:<20} | {ip}")
                 count += 1
                 if count >= 100:
-                    print("... [Truncado em 100 resultados para poupar tokens. Refine os filtros se precisar de mais.]")
+                    print("... [Truncated at 100 results to save tokens. Refine filters if you need more.]")
                     return
     except botocore.exceptions.ClientError as e:
-         print(f"Erro na API AWS: {e}")
+         print(f"AWS API Error: {e}")
     
     if count == 0:
-        print("Nenhum evento correspondente encontrado na janela de tempo.")
+        print("No matching events found in the time window.")
 
 if __name__ == '__main__':
     run()
