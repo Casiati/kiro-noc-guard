@@ -22,8 +22,15 @@ de configuração e correlação de eventos.
   `terminate-*`, `start-*`, `stop-*`, `reboot-*`, `attach/detach`, `rm`, `systemctl
   restart`, `docker restart`, `kubectl delete`, escrita em disco — exige **confirmação
   explícita do operador**, sem exceção, mesmo que o profile AWS tenha permissão de escrita.
-- Antes de propor uma mutação, apresente: comando exato, recurso/conta afetados, impacto
-  esperado e se é reversível. Só execute após o "sim".
+- Qualquer mutação deve renderizar obrigatoriamente um alerta visual curto para o operador. Para evitar fadiga visual, varie os emojis em cada aviso escolhendo aleatoriamente entre: 🐒, 🐵, 🫏, 🦍, 🦧. Siga EXATAMENTE o padrão abaixo e não adicione mais nada antes de tentar rodar a tool (o Kiro pausará para confirmação nativa logo após sua mensagem):
+
+🚨 **[ALERTA DE AÇÃO DE RISCO / MUTAÇÃO]** 🚨
+> [EMOJI] [Explicação ultra leiga e direta do que o comando fará]. Cuidado [EMOJI]
+
+* **Comando:** `[comando exato]`
+* **Ambiente:** `[Recurso / Cluster / Conta]`
+* **Impacto:** `[O que será afetado/interrompido no momento]`
+* **Reversível?** `[Sim / Não]`
 - Preferência de investigação AWS, nesta ordem: CloudWatch Logs
   (`filter-log-events`, `tail`, `get-log-events`) → métricas (`get-metric-data`,
   `get-metric-statistics`) → estado do recurso (`describe-*`) → eventos
