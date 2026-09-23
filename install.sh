@@ -191,13 +191,13 @@ for f in "$STEERING_FILE" "$GEN_FILE" "$NEW_AGENT"; do
     python3 - "$f" "$HOME" <<'PY'
 import sys, pathlib, os
 p, home = pathlib.Path(sys.argv[1]), sys.argv[2]
-content = p.read_text()
+content = p.read_text(encoding="utf-8")
 content = content.replace("__HOME__", home)
 if "__LANGUAGE_RULE__" in content:
     content = content.replace("__LANGUAGE_RULE__", os.environ.get("LANG_RULE_TEXT", ""))
 if "__ALERT_TEMPLATE__" in content:
     content = content.replace("__ALERT_TEMPLATE__", os.environ.get("ALERT_TPL_TEXT", ""))
-p.write_text(content)
+p.write_text(content, encoding="utf-8")
 PY
     say "-> configured variables in $(basename "$f")"
   fi
@@ -210,7 +210,7 @@ python3 "$GEN_FILE" --agent "$NEW_AGENT" || die "$MSG_ERR_TESTS"
 
 python3 - "$NEW_AGENT" <<'PY'
 import json, sys, pathlib
-cfg = json.loads(pathlib.Path(sys.argv[1]).read_text())
+cfg = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 sh = cfg["toolsSettings"]["shell"]
 print(f"  AUTO: {len(sh['allowedCommands'])} | DENY: {len(sh['deniedCommands'])} | TOOLS: {len(cfg['allowedTools'])}")
 PY

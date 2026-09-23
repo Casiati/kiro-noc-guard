@@ -382,13 +382,13 @@ def apply_to_agent(agent: Path):
     if not agent.is_file():
         sys.exit(f"error: agent not found at {agent}\n"
                  f"install the template first (see install.sh) or use --agent PATH")
-    cfg = json.loads(agent.read_text())
+    cfg = json.loads(agent.read_text(encoding="utf-8"))
     shell = cfg.setdefault("toolsSettings", {}).setdefault("shell", {})
     shell["allowedCommands"] = ALLOWED
     shell["deniedCommands"] = DENY
     shell["autoAllowReadonly"] = False   # explicit allowlist is the single source of truth
     shell["denyByDefault"] = False       # unlisted => prompts for confirmation (does not block)
-    agent.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+    agent.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"applied to {agent}")
 
 
