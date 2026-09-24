@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
 import os
+import re
 import sys
 import argparse
 import subprocess
 import datetime
 from pathlib import Path
 
+# Mesma regra de validação de nome de bucket S3 usada em install.sh/install.ps1:
+# 3-63 caracteres, minusculas/numeros/hifen/ponto, sem '..'.
+BUCKET_RE = re.compile(r'^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
+
+def valid_bucket(bucket):
+    return bool(bucket) and bool(BUCKET_RE.match(bucket)) and ".." not in bucket
+
 def run_cmd(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    return result.returncode, result.stdout, result.stderr
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return result.returncode, result.stdout, result.stderr
+    except FileNotFoundError:
+        return 127, "", f"comando '{cmd[0]}' não encontrado. Instale o AWS CLI para usar a Base de Conhecimento compartilhada."
 
 def sync_from_s3(bucket, local_dir):
     print(f"📥 Sincronizando da nuvem S3 (s3://{bucket}) para {local_dir}...")
@@ -44,6 +55,12 @@ def add_entry(bucket, local_dir, alert_name, content):
     print(f"✅ Análise registrada localmente em: {file_path}")
     if sync_to_s3(bucket, local_dir):
         print("☁️ Base de conhecimento atualizada com sucesso no S3!")
+        return True
+    else:
+        print("⚠️ ATENÇÃO: o registro ficou APENAS local — a equipe NÃO recebeu esta atualização "
+              "(falha ao sincronizar com o S3). Rode 'kb_manager.py --action sync' quando o "
+              "acesso ao bucket for restabelecido.", file=sys.stderr)
+        return False
 
 def search_entry(bucket, local_dir, query):
     if bucket:
@@ -79,6 +96,11 @@ def main():
     parser.add_argument("--query", help="Termo de pesquisa (obrigatório para action=search)")
     
     args = parser.parse_args()
+
+    if not valid_bucket(args.bucket):
+        print("Erro: nome de bucket S3 inválido. Deve ter entre 3 e 63 caracteres "
+              "(letras minúsculas, números, hífens e pontos; sem '..').", file=sys.stderr)
+        sys.exit(1)
     
     local_dir = Path.home() / ".kiro" / "noc-guard" / "kb"
     local_dir.mkdir(parents=True, exist_ok=True)
@@ -87,7 +109,8 @@ def main():
         if not args.alert or not args.content:
             print("Erro: --alert e --content são obrigatórios para registrar um aprendizado.", file=sys.stderr)
             sys.exit(1)
-        add_entry(args.bucket, local_dir, args.alert, args.content)
+        if not add_entry(args.bucket, local_dir, args.alert, args.content):
+            sys.exit(2)  # registro salvo localmente, mas NÃO compartilhado com a equipe
     elif args.action == "search":
         if not args.query:
             print("Erro: --query é obrigatório para pesquisar na base de conhecimento.", file=sys.stderr)
@@ -95,7 +118,8 @@ def main():
         search_entry(args.bucket, local_dir, args.query)
     elif args.action == "sync":
         sync_from_s3(args.bucket, local_dir)
-        sync_to_s3(args.bucket, local_dir)
+        if not sync_to_s3(args.bucket, local_dir):
+            sys.exit(2)
         print("✅ Sincronização concluída.")
 
 if __name__ == "__main__":

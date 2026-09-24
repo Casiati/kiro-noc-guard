@@ -309,7 +309,7 @@ EXISTING_BUCKET=""
 if [ -f "$KB_CONFIG_FILE" ]; then
   EXISTING_BUCKET="$(cat "$KB_CONFIG_FILE" 2>/dev/null | tr -d '[:space:]')"
 elif [ -f "$STEERING_FILE" ]; then
-  EXISTING_BUCKET="$(grep -oE -- '--bucket [a-z0-9.-]+' "$STEERING_FILE" 2>/dev/null | awk '{print $2}')"
+  EXISTING_BUCKET="$(grep -oE -- '--bucket [a-z0-9][a-z0-9.-]*[a-z0-9]' "$STEERING_FILE" 2>/dev/null | awk '{print $2}')"
 fi
 
 KB_BUCKET=""
@@ -382,7 +382,7 @@ fi
 if [ -n "$KB_BUCKET" ]; then
   mkdir -p "$KIRO_DIR/noc-guard"
   echo "$KB_BUCKET" > "$KB_CONFIG_FILE"
-  if [ "$LANG_CHOICE" = "1" ]; then
+  if [ "$LANG_CHOICE" != "2" ]; then
     export KB_DIRECTIVE_TEXT="- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET\`. Whenever you successfully diagnose a complex root cause, run \`kb_manager.py --action add\` to auto-document the resolution."
   else
     export KB_DIRECTIVE_TEXT="- Para consultar ou registrar aprendizados na Base de Conhecimento / Runbooks compartilhados da equipe, utilize o script: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET\`. Sempre que diagnosticar com sucesso a causa raiz de um incidente complexo, execute \`kb_manager.py --action add\` para auto-documentar a resolução."
