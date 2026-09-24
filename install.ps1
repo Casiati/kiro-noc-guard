@@ -17,6 +17,13 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_KIRO_NO = "kiro-cli    NAO encontrado - a instalacao continua, mas o agente so funciona com o Kiro CLI"
     $MSG_OPT_OK = "encontrado (opcional)"
     $MSG_OPT_NO = "ausente (opcional - padroes inativos)"
+    $MSG_WINGET_INSTALL = "instale com: winget install {0}"
+    $MSG_PY_REC = "Recomendacao: Voce pode instalar o Python no Windows facilmente via winget:`n  winget install Python.Python.3.12"
+    $MSG_MISSING_NOTICE = "Alguns requisitos nao foram encontrados nesta maquina:"
+    $MSG_MISSING_ESSENTIAL = "Essenciais (obrigatorios):"
+    $MSG_MISSING_OPTIONAL = "Opcionais (recomendados):"
+    $MSG_AUTO_INSTALL_PROMPT = "Deseja tentar instalar os itens ausentes automaticamente via winget/pip agora? [s/N] "
+    $MSG_INSTALLING_PKG = "Instalando: {0}..."
     $MSG_VAL_REPO = "Validando arquivos do repositorio"
     $MSG_ERR_MISSING = "arquivo ausente no repositorio:"
     $MSG_ERR_ABS = "ha caminho absoluto de usuario nos arquivos de origem; use ~ ou __HOME__."
@@ -47,6 +54,12 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_KB_INVALID = "Nome de bucket invalido! Deve ter entre 3 e 63 caracteres (letras minusculas, numeros, hifens e pontos; sem '..')."
     $MSG_KB_SKIPPED = "Base de Conhecimento nao ativada (pode ser configurada depois)."
 
+    $MSG_BOTO_PROMPT = "Deseja instalar o boto3 automaticamente via pip? [s/N] "
+    $MSG_BOTO_DESC = "Beneficio: O boto3 e o SDK oficial da AWS para Python. Ele faz consultas diretas na API em memoria, tornando a busca no CloudTrail mais rapida e precisa do que via CLI."
+    $MSG_BOTO_INSTALLING = "Instalando boto3 via pip..."
+    $MSG_BOTO_OK = "boto3 instalado com sucesso!"
+    $MSG_BOTO_FAIL = "Nao foi possivel instalar o boto3 automaticamente. O fallback nativo da AWS CLI continuara sendo usado normalmente."
+
     $env:LANG_RULE_TEXT = "CRITICAL LANGUAGE RULE: Although your system prompt is in English, you MUST ALWAYS output the visual alerts and all chat interactions exclusively in Brazilian Portuguese (pt-BR)."
     $env:ALERT_TPL_TEXT = "🚨 **[ALERTA DE ACAO DE RISCO / MUTACAO]** 🚨`n> [EMOJI] [Explicacao ultra leiga e direta do que o comando fara]. Cuidado [EMOJI]`n`n* **Comando:** ``[comando exato]```n* **Ambiente:** ``[Recurso / Cluster / Conta]```n* **Impacto:** ``[O que sera afetado/interrompido no momento]```n* **Reversivel?** ``[Sim / Nao]```n"
 } else {
@@ -56,6 +69,13 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_KIRO_NO = "kiro-cli    NOT found - installation continues, but agent only works with Kiro CLI"
     $MSG_OPT_OK = "found (optional)"
     $MSG_OPT_NO = "missing (optional - related patterns will be inert)"
+    $MSG_WINGET_INSTALL = "install with: winget install {0}"
+    $MSG_PY_REC = "Recommendation: You can easily install Python on Windows via winget:`n  winget install Python.Python.3.12"
+    $MSG_MISSING_NOTICE = "Some prerequisites were not found on this machine:"
+    $MSG_MISSING_ESSENTIAL = "Essential (required):"
+    $MSG_MISSING_OPTIONAL = "Optional (recommended):"
+    $MSG_AUTO_INSTALL_PROMPT = "Would you like to attempt automatic installation of missing items via winget/pip now? [y/N] "
+    $MSG_INSTALLING_PKG = "Installing: {0}..."
     $MSG_VAL_REPO = "Validating repository files"
     $MSG_ERR_MISSING = "missing file in repository:"
     $MSG_ERR_ABS = "absolute user path found in source files; use ~ or __HOME__."
@@ -85,6 +105,12 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_KB_PROMPT = "Enter the full S3 Bucket name (e.g., noc-runbooks-123456789012-us-east-1): "
     $MSG_KB_INVALID = "Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
     $MSG_KB_SKIPPED = "Knowledge Base skipped (can be configured later)."
+
+    $MSG_BOTO_PROMPT = "Would you like to install boto3 automatically via pip? [y/N] "
+    $MSG_BOTO_DESC = "Benefit: boto3 is the official AWS SDK for Python. It makes direct in-memory API queries, making CloudTrail searches faster and more accurate than via CLI."
+    $MSG_BOTO_INSTALLING = "Installing boto3 via pip..."
+    $MSG_BOTO_OK = "boto3 installed successfully!"
+    $MSG_BOTO_FAIL = "Could not automatically install boto3 via pip. The native AWS CLI fallback will continue to be used."
 
     $env:LANG_RULE_TEXT = "CRITICAL LANGUAGE RULE: You MUST ALWAYS interact with the user and render the visual alerts exclusively in English."
     $env:ALERT_TPL_TEXT = "🚨 **[RISK ACTION / MUTATION ALERT]** 🚨`n> [EMOJI] [Ultra-layman and direct explanation of what the command will do, e.g., `"This will destroy the production pod`"]. Warning [EMOJI]`n`n* **Command:** ``[exact command]```n* **Environment:** ``[Resource / Cluster / Account]```n* **Impact:** ``[What will be affected/interrupted right now]```n* **Reversible?** ``[Yes / No]```n"
@@ -121,6 +147,88 @@ if (-not $hasPython) {
     }
 }
 
+# 1. Identifica o que esta faltando antes
+$missingEssential = @()
+$missingOptional = @()
+
+if (-not $hasPython) {
+    $missingEssential += "python"
+}
+
+$WINGET_MAP = @{
+    "python"  = "Python.Python.3.12"
+    "aws"     = "Amazon.AWSCLI"
+    "kubectl" = "Kubernetes.kubectl"
+    "docker"  = "Docker.DockerDesktop"
+    "jq"      = "jqlang.jq"
+}
+
+foreach ($opt in @("aws", "kubectl", "docker", "jq")) {
+    if (-not (Get-Command $opt -ErrorAction SilentlyContinue)) {
+        $missingOptional += $opt
+    }
+}
+
+$hasBoto = $false
+if ($hasPython) {
+    $testBoto = python -c "import boto3; print('ok')" 2>$null
+    if ($testBoto -eq "ok") { $hasBoto = $true }
+}
+if (-not $hasBoto) {
+    $missingOptional += "boto3"
+}
+
+# Se houver itens ausentes, exibe resumo detalhado e pergunta se quer instalar
+if ($missingEssential.Count -gt 0 -or $missingOptional.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  AVISO: $MSG_MISSING_NOTICE" -ForegroundColor Yellow
+    if ($missingEssential.Count -gt 0) {
+        Write-Host "  - $MSG_MISSING_ESSENTIAL $($missingEssential -join ', ')" -ForegroundColor Red
+    }
+    if ($missingOptional.Count -gt 0) {
+        Write-Host "  - $MSG_MISSING_OPTIONAL $($missingOptional -join ', ')" -ForegroundColor Cyan
+    }
+    Write-Host ""
+
+    if (-not $Yes) {
+        $respAuto = Read-Host "  $MSG_AUTO_INSTALL_PROMPT"
+        if ($respAuto -match "^[sSyY]") {
+            $hasWinget = (Get-Command "winget" -ErrorAction SilentlyContinue)
+            if ($hasWinget) {
+                foreach ($item in ($missingEssential + $missingOptional)) {
+                    if ($item -eq "boto3") {
+                        if ($hasPython -or (Get-Command "python" -ErrorAction SilentlyContinue)) {
+                            Say ($MSG_INSTALLING_PKG -f "boto3 via pip")
+                            Start-Process python -ArgumentList "-m pip install boto3 --quiet" -NoNewWindow -Wait
+                        }
+                    } else {
+                        $pkg = $WINGET_MAP[$item]
+                        if ($pkg) {
+                            Say ($MSG_INSTALLING_PKG -f "$item ($pkg)")
+                            Start-Process winget -ArgumentList "install --id $pkg -e --accept-package-agreements --accept-source-agreements" -NoNewWindow -Wait
+                        }
+                    }
+                }
+                # Recarrega PATH para detectar os novos binarios na sessao atual
+                $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            } else {
+                Write-Host "  AVISO: winget nao encontrado para instalacao automatica." -ForegroundColor Yellow
+            }
+        }
+    }
+}
+
+# 2. Exibicao final dos pre-requisitos
+$hasPython = $false
+if (Get-Command "python" -ErrorAction SilentlyContinue) {
+    if ((python --version 2>&1) -match "Python") { $hasPython = $true }
+}
+if (-not $hasPython -and (Get-Command "python3" -ErrorAction SilentlyContinue)) {
+    if ((python3 --version 2>&1) -match "Python") {
+        Set-Alias python python3
+        $hasPython = $true
+    }
+}
 if (-not $hasPython) {
     Die $MSG_NO_PY
 }

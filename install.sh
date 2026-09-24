@@ -54,6 +54,18 @@ if [ "$LANG_CHOICE" = "2" ]; then
   MSG_KB_INVALID="Nome de bucket inválido! Deve ter entre 3 e 63 caracteres (letras minúsculas, números, hífens e pontos; sem '..')."
   MSG_KB_SKIPPED="Base de Conhecimento não ativada (pode ser configurada depois)."
 
+  MSG_BOTO_PROMPT="Deseja instalar o boto3 automaticamente via pip? [s/N] "
+  MSG_BOTO_DESC="Benefício: O boto3 é o SDK oficial da AWS para Python. Ele faz consultas diretas na API em memória, tornando a busca no CloudTrail mais rápida e precisa do que via CLI."
+  MSG_BOTO_INSTALLING="Instalando boto3 via pip..."
+  MSG_BOTO_OK="boto3 instalado com sucesso!"
+  MSG_BOTO_FAIL="Não foi possível instalar o boto3 automaticamente. O fallback nativo da AWS CLI continuará sendo usado normalmente."
+
+  MSG_MISSING_NOTICE="Alguns requisitos não foram encontrados nesta máquina:"
+  MSG_MISSING_ESSENTIAL="Essenciais (obrigatórios):"
+  MSG_MISSING_OPTIONAL="Opcionais (recomendados):"
+  MSG_AUTO_INSTALL_PROMPT="Deseja tentar instalar os itens ausentes automaticamente agora? [s/N] "
+  MSG_INSTALLING_PKG="Instalando: %s..."
+
   export LANG_RULE_TEXT="CRITICAL LANGUAGE RULE: Although your system prompt is in English, you MUST ALWAYS output the visual alerts and all chat interactions exclusively in Brazilian Portuguese (pt-BR)."
   export ALERT_TPL_TEXT="🚨 **[ALERTA DE AÇÃO DE RISCO / MUTAÇÃO]** 🚨
 > [EMOJI] [Explicação ultra leiga e direta do que o comando fará]. Cuidado [EMOJI]
@@ -99,6 +111,18 @@ else
   MSG_KB_INVALID="Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
   MSG_KB_SKIPPED="Knowledge Base skipped (can be configured later)."
 
+  MSG_BOTO_PROMPT="Would you like to install boto3 automatically via pip? [y/N] "
+  MSG_BOTO_DESC="Benefit: boto3 is the official AWS SDK for Python. It makes direct in-memory API queries, making CloudTrail searches faster and more accurate than via CLI."
+  MSG_BOTO_INSTALLING="Installing boto3 via pip..."
+  MSG_BOTO_OK="boto3 installed successfully!"
+  MSG_BOTO_FAIL="Could not automatically install boto3 via pip. The native AWS CLI fallback will continue to be used."
+
+  MSG_MISSING_NOTICE="Some prerequisites were not found on this machine:"
+  MSG_MISSING_ESSENTIAL="Essential (required):"
+  MSG_MISSING_OPTIONAL="Optional (recommended):"
+  MSG_AUTO_INSTALL_PROMPT="Would you like to attempt automatic installation of missing items now? [y/N] "
+  MSG_INSTALLING_PKG="Installing: %s..."
+
   export LANG_RULE_TEXT="CRITICAL LANGUAGE RULE: You MUST ALWAYS interact with the user and render the visual alerts exclusively in English."
   export ALERT_TPL_TEXT="🚨 **[RISK ACTION / MUTATION ALERT]** 🚨
 > [EMOJI] [Ultra-layman and direct explanation of what the command will do, e.g., \"This will destroy the production pod\"]. Warning [EMOJI]
@@ -136,8 +160,104 @@ die()  { printf '\nERRO/ERROR: %s\n' "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- pré-requisitos
 step "$MSG_REQ"
-command -v python3 >/dev/null 2>&1 || die "$MSG_NO_PY"
-say "python3     $(python3 --version 2>&1 | awk '{print $2}')"
+
+# 1. Identifica o que está faltando antes
+MISSING_ESSENTIAL=()
+MISSING_OPTIONAL=()
+
+if ! command -v python3 >/dev/null 2>&1; then
+  MISSING_ESSENTIAL+=("python3")
+fi
+
+for opt in aws kubectl docker jq; do
+  if ! command -v "$opt" >/dev/null 2>&1; then
+    MISSING_OPTIONAL+=("$opt")
+  fi
+done
+
+if command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c 'import boto3' >/dev/null 2>&1; then
+    MISSING_OPTIONAL+=("boto3")
+  fi
+else
+  MISSING_OPTIONAL+=("boto3")
+fi
+
+# Se houver itens ausentes, exibe resumo detalhado e pergunta se quer instalar
+if [ "${#MISSING_ESSENTIAL[@]}" -gt 0 ] || [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
+  printf '\n'
+  warn "$MSG_MISSING_NOTICE"
+  if [ "${#MISSING_ESSENTIAL[@]}" -gt 0 ]; then
+    printf '  - %s %s\n' "$MSG_MISSING_ESSENTIAL" "${MISSING_ESSENTIAL[*]}"
+  fi
+  if [ "${#MISSING_OPTIONAL[@]}" -gt 0 ]; then
+    printf '  - %s %s\n' "$MSG_MISSING_OPTIONAL" "${MISSING_OPTIONAL[*]}"
+  fi
+  printf '\n'
+
+  if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+    read -r -p "  $MSG_AUTO_INSTALL_PROMPT" AUTO_INST_ANS < /dev/tty || AUTO_INST_ANS=""
+    case "$AUTO_INST_ANS" in
+      [sSyY]*)
+        SUDO_CMD=""
+        if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+          SUDO_CMD="sudo"
+        fi
+
+        if command -v apt-get >/dev/null 2>&1; then
+          say "atualizando lista de pacotes (apt-get)..."
+          $SUDO_CMD apt-get update -qq 2>/dev/null || true
+          
+          PKGS_TO_INSTALL=()
+          for item in "${MISSING_ESSENTIAL[@]}" "${MISSING_OPTIONAL[@]}"; do
+            case "$item" in
+              python3) PKGS_TO_INSTALL+=("python3" "python3-pip") ;;
+              jq)      PKGS_TO_INSTALL+=("jq") ;;
+              aws)     PKGS_TO_INSTALL+=("awscli") ;;
+              docker)  PKGS_TO_INSTALL+=("docker.io") ;;
+              kubectl) PKGS_TO_INSTALL+=("kubectl") ;;
+              boto3)   PKGS_TO_INSTALL+=("python3-boto3") ;;
+            esac
+          done
+          
+          if [ "${#PKGS_TO_INSTALL[@]}" -gt 0 ]; then
+            say "instalando via apt: ${PKGS_TO_INSTALL[*]}..."
+            $SUDO_CMD apt-get install -y "${PKGS_TO_INSTALL[@]}" || true
+          fi
+        elif command -v dnf >/dev/null 2>&1; then
+          PKGS_TO_INSTALL=()
+          for item in "${MISSING_ESSENTIAL[@]}" "${MISSING_OPTIONAL[@]}"; do
+            case "$item" in
+              python3) PKGS_TO_INSTALL+=("python3" "python3-pip") ;;
+              jq)      PKGS_TO_INSTALL+=("jq") ;;
+              aws)     PKGS_TO_INSTALL+=("awscli") ;;
+              docker)  PKGS_TO_INSTALL+=("docker") ;;
+              boto3)   PKGS_TO_INSTALL+=("python3-boto3") ;;
+            esac
+          done
+          if [ "${#PKGS_TO_INSTALL[@]}" -gt 0 ]; then
+            say "instalando via dnf: ${PKGS_TO_INSTALL[*]}..."
+            $SUDO_CMD dnf install -y "${PKGS_TO_INSTALL[@]}" || true
+          fi
+        fi
+
+        # Se boto3 ainda não estiver instalado, tenta via pip
+        if command -v python3 >/dev/null 2>&1 && ! python3 -c 'import boto3' >/dev/null 2>&1; then
+          say "instalando boto3 via pip..."
+          python3 -m pip install boto3 --quiet 2>/dev/null || python3 -m pip install boto3 --break-system-packages --quiet 2>/dev/null || true
+        fi
+        printf '\n'
+        ;;
+    esac
+  fi
+fi
+
+# 2. Exibição final dos pré-requisitos
+if command -v python3 >/dev/null 2>&1; then
+  say "python3     $(python3 --version 2>&1 | awk '{print $2}')"
+else
+  die "$MSG_NO_PY"
+fi
 
 if command -v kiro-cli >/dev/null 2>&1; then
   say "$MSG_KIRO_OK"
@@ -146,6 +266,7 @@ else
   say "$MSG_KIRO_NO"
   HAS_KIRO=0
 fi
+
 for opt in aws kubectl docker jq; do
   if command -v "$opt" >/dev/null 2>&1; then
     say "$opt$(printf '%*s' $((12 - ${#opt})) '') $MSG_OPT_OK"
