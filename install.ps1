@@ -49,6 +49,8 @@ if ($LANG_CHOICE -eq "2") {
 
     $MSG_KB_TITLE = "Base de Conhecimento Compartilhada (AWS S3)"
     $MSG_KB_DESC = "O agente pode auto-documentar a resolucao de incidentes em arquivos Markdown sincronizados via AWS S3 para toda a equipe compartilhar o historico de solucoes."
+    $MSG_KB_EXISTING = "Bucket S3 configurado atualmente: {0}"
+    $MSG_KB_KEEP_PROMPT = "Deseja manter o bucket atual [{0}]? [S/n/trocar] (Enter para manter): "
     $MSG_KB_ENABLE = "Deseja ativar a Base de Conhecimento compartilhada via AWS S3? [s/N] "
     $MSG_KB_PROMPT = "Informe o nome completo do Bucket S3 (ex: noc-runbooks-123456789012-us-east-1): "
     $MSG_KB_INVALID = "Nome de bucket invalido! Deve ter entre 3 e 63 caracteres (letras minusculas, numeros, hifens e pontos; sem '..')."
@@ -101,6 +103,8 @@ if ($LANG_CHOICE -eq "2") {
 
     $MSG_KB_TITLE = "Shared Knowledge Base (AWS S3)"
     $MSG_KB_DESC = "The agent can auto-document incident resolutions into Markdown files synced via AWS S3 so the entire team shares the same troubleshooting history."
+    $MSG_KB_EXISTING = "Currently configured S3 Bucket: {0}"
+    $MSG_KB_KEEP_PROMPT = "Keep current bucket [{0}]? [Y/n/change] (Enter to keep): "
     $MSG_KB_ENABLE = "Enable shared Knowledge Base via AWS S3? [y/N] "
     $MSG_KB_PROMPT = "Enter the full S3 Bucket name (e.g., noc-runbooks-123456789012-us-east-1): "
     $MSG_KB_INVALID = "Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
@@ -273,29 +277,76 @@ foreach ($f in $FILES) {
 
 # Knowledge Base (Optional)
 Step $MSG_KB_TITLE
-Say $MSG_KB_DESC
+
+$KB_CONFIG_FILE = Join-Path $KIRO_DIR "noc-guard\.kb_bucket"
+$EXISTING_BUCKET = ""
+if (Test-Path $KB_CONFIG_FILE) {
+    $EXISTING_BUCKET = (Get-Content $KB_CONFIG_FILE -Raw).Trim()
+} elseif (Test-Path $STEERING_FILE) {
+    $match = Select-String -Path $STEERING_FILE -Pattern '--bucket\s+([a-z0-9.-]+)'
+    if ($match -and $match.Matches.Groups.Count -gt 1) {
+        $EXISTING_BUCKET = $match.Matches.Groups[1].Value
+    }
+}
+
 $KB_BUCKET = ""
-$ENABLE_KB_ANS = Read-Host "$MSG_KB_ENABLE"
-if ($ENABLE_KB_ANS -match '^[sSyY]') {
-    while ($true) {
-        $BUCKET_INPUT = (Read-Host "$MSG_KB_PROMPT").Trim()
-        if ([string]::IsNullOrWhiteSpace($BUCKET_INPUT)) {
-            Say $MSG_KB_SKIPPED
-            break
-        }
-        if ($BUCKET_INPUT -match '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' -and -not ($BUCKET_INPUT.Contains(".."))) {
-            $KB_BUCKET = $BUCKET_INPUT
-            Say "ok: bucket configurado -> $KB_BUCKET"
-            break
+if ($EXISTING_BUCKET) {
+    Say ($MSG_KB_EXISTING -f $EXISTING_BUCKET)
+    if (-not $Yes) {
+        $KEEP_ANS = (Read-Host ($MSG_KB_KEEP_PROMPT -f $EXISTING_BUCKET)).Trim()
+        if ([string]::IsNullOrWhiteSpace($KEEP_ANS) -or $KEEP_ANS -match '^[sSyY]') {
+            $KB_BUCKET = $EXISTING_BUCKET
+            Say "ok: mantendo bucket -> $KB_BUCKET"
+        } elseif ($KEEP_ANS -match '^[tTcC]') {
+            while ($true) {
+                $BUCKET_INPUT = (Read-Host "$MSG_KB_PROMPT").Trim()
+                if ([string]::IsNullOrWhiteSpace($BUCKET_INPUT)) {
+                    Say $MSG_KB_SKIPPED
+                    break
+                }
+                if ($BUCKET_INPUT -match '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' -and -not ($BUCKET_INPUT.Contains(".."))) {
+                    $KB_BUCKET = $BUCKET_INPUT
+                    Say "ok: bucket configurado -> $KB_BUCKET"
+                    break
+                } else {
+                    Write-Host "  AVISO: $MSG_KB_INVALID" -ForegroundColor Yellow
+                }
+            }
         } else {
-            Write-Host "  AVISO: $MSG_KB_INVALID" -ForegroundColor Yellow
+            Say $MSG_KB_SKIPPED
+            if (Test-Path $KB_CONFIG_FILE) { Remove-Item $KB_CONFIG_FILE -Force }
         }
+    } else {
+        $KB_BUCKET = $EXISTING_BUCKET
+        Say "ok: mantendo bucket configurado -> $KB_BUCKET"
     }
 } else {
-    Say $MSG_KB_SKIPPED
+    Say $MSG_KB_DESC
+    $ENABLE_KB_ANS = Read-Host "$MSG_KB_ENABLE"
+    if ($ENABLE_KB_ANS -match '^[sSyY]') {
+        while ($true) {
+            $BUCKET_INPUT = (Read-Host "$MSG_KB_PROMPT").Trim()
+            if ([string]::IsNullOrWhiteSpace($BUCKET_INPUT)) {
+                Say $MSG_KB_SKIPPED
+                break
+            }
+            if ($BUCKET_INPUT -match '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' -and -not ($BUCKET_INPUT.Contains(".."))) {
+                $KB_BUCKET = $BUCKET_INPUT
+                Say "ok: bucket configurado -> $KB_BUCKET"
+                break
+            } else {
+                Write-Host "  AVISO: $MSG_KB_INVALID" -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Say $MSG_KB_SKIPPED
+    }
 }
 
 if ($KB_BUCKET) {
+    $nocGuardDir = Join-Path $KIRO_DIR "noc-guard"
+    if (-not (Test-Path $nocGuardDir)) { New-Item -ItemType Directory -Path $nocGuardDir -Force | Out-Null }
+    Set-Content -Path $KB_CONFIG_FILE -Value $KB_BUCKET -Encoding utf8
     if ($langChoice -eq "1") {
         $env:KB_DIRECTIVE_TEXT = "- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Whenever you successfully diagnose a complex root cause, run ``kb_manager.py --action add`` to auto-document the resolution."
     } else {

@@ -49,6 +49,8 @@ if [ "$LANG_CHOICE" = "2" ]; then
 
   MSG_KB_TITLE="Base de Conhecimento Compartilhada (AWS S3)"
   MSG_KB_DESC="O agente pode auto-documentar a resolução de incidentes em arquivos Markdown sincronizados via AWS S3 para toda a equipe compartilhar o histórico de soluções."
+  MSG_KB_EXISTING="Bucket S3 configurado atualmente: %s"
+  MSG_KB_KEEP_PROMPT="Deseja manter o bucket atual [%s]? [S/n/trocar] (Enter para manter): "
   MSG_KB_ENABLE="Deseja ativar a Base de Conhecimento compartilhada via AWS S3? [s/N] "
   MSG_KB_PROMPT="Informe o nome completo do Bucket S3 (ex: noc-runbooks-123456789012-us-east-1): "
   MSG_KB_INVALID="Nome de bucket inválido! Deve ter entre 3 e 63 caracteres (letras minúsculas, números, hífens e pontos; sem '..')."
@@ -106,6 +108,8 @@ else
 
   MSG_KB_TITLE="Shared Knowledge Base (AWS S3)"
   MSG_KB_DESC="The agent can auto-document incident resolutions into Markdown files synced via AWS S3 so the entire team shares the same troubleshooting history."
+  MSG_KB_EXISTING="Currently configured S3 Bucket: %s"
+  MSG_KB_KEEP_PROMPT="Keep current bucket [%s]? [Y/n/change] (Enter to keep): "
   MSG_KB_ENABLE="Enable shared Knowledge Base via AWS S3? [y/N] "
   MSG_KB_PROMPT="Enter the full S3 Bucket name (e.g., noc-runbooks-123456789012-us-east-1): "
   MSG_KB_INVALID="Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
@@ -299,37 +303,85 @@ fi
 
 # --------------------------------------------- base de conhecimento (opcional)
 step "$MSG_KB_TITLE"
-say "$MSG_KB_DESC"
+
+KB_CONFIG_FILE="$KIRO_DIR/noc-guard/.kb_bucket"
+EXISTING_BUCKET=""
+if [ -f "$KB_CONFIG_FILE" ]; then
+  EXISTING_BUCKET="$(cat "$KB_CONFIG_FILE" 2>/dev/null | tr -d '[:space:]')"
+elif [ -f "$STEERING_FILE" ]; then
+  EXISTING_BUCKET="$(grep -oE -- '--bucket [a-z0-9.-]+' "$STEERING_FILE" 2>/dev/null | awk '{print $2}')"
+fi
+
 KB_BUCKET=""
-if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
-  read -r -p "$MSG_KB_ENABLE" ENABLE_KB_ANS < /dev/tty || ENABLE_KB_ANS=""
-  case "$ENABLE_KB_ANS" in
-    [sSyY]*)
-      while true; do
-        read -r -p "$MSG_KB_PROMPT" BUCKET_INPUT < /dev/tty || BUCKET_INPUT=""
-        BUCKET_INPUT="$(echo "$BUCKET_INPUT" | tr -d '[:space:]')"
-        if [ -z "$BUCKET_INPUT" ]; then
-          say "$MSG_KB_SKIPPED"
-          break
-        fi
-        if [[ "$BUCKET_INPUT" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] && [[ "$BUCKET_INPUT" != *".."* ]]; then
-          KB_BUCKET="$BUCKET_INPUT"
-          say "ok: bucket configurado -> $KB_BUCKET"
-          break
-        else
-          warn "$MSG_KB_INVALID"
-        fi
-      done
-      ;;
-    *)
-      say "$MSG_KB_SKIPPED"
-      ;;
-  esac
+if [ -n "$EXISTING_BUCKET" ]; then
+  say "$(printf "$MSG_KB_EXISTING" "$EXISTING_BUCKET")"
+  if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+    read -r -p "$(printf "$MSG_KB_KEEP_PROMPT" "$EXISTING_BUCKET")" KEEP_ANS < /dev/tty || KEEP_ANS=""
+    case "$KEEP_ANS" in
+      ""|[sSyY]*)
+        KB_BUCKET="$EXISTING_BUCKET"
+        say "ok: mantendo bucket -> $KB_BUCKET"
+        ;;
+      [tT]*|[cC]*)
+        while true; do
+          read -r -p "$MSG_KB_PROMPT" BUCKET_INPUT < /dev/tty || BUCKET_INPUT=""
+          BUCKET_INPUT="$(echo "$BUCKET_INPUT" | tr -d '[:space:]')"
+          if [ -z "$BUCKET_INPUT" ]; then
+            say "$MSG_KB_SKIPPED"
+            break
+          fi
+          if [[ "$BUCKET_INPUT" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] && [[ "$BUCKET_INPUT" != *".."* ]]; then
+            KB_BUCKET="$BUCKET_INPUT"
+            say "ok: bucket configurado -> $KB_BUCKET"
+            break
+          else
+            warn "$MSG_KB_INVALID"
+          fi
+        done
+        ;;
+      *)
+        say "$MSG_KB_SKIPPED"
+        rm -f "$KB_CONFIG_FILE" 2>/dev/null || true
+        ;;
+    esac
+  else
+    KB_BUCKET="$EXISTING_BUCKET"
+    say "ok: mantendo bucket configurado -> $KB_BUCKET"
+  fi
 else
-  say "$MSG_KB_SKIPPED"
+  say "$MSG_KB_DESC"
+  if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+    read -r -p "$MSG_KB_ENABLE" ENABLE_KB_ANS < /dev/tty || ENABLE_KB_ANS=""
+    case "$ENABLE_KB_ANS" in
+      [sSyY]*)
+        while true; do
+          read -r -p "$MSG_KB_PROMPT" BUCKET_INPUT < /dev/tty || BUCKET_INPUT=""
+          BUCKET_INPUT="$(echo "$BUCKET_INPUT" | tr -d '[:space:]')"
+          if [ -z "$BUCKET_INPUT" ]; then
+            say "$MSG_KB_SKIPPED"
+            break
+          fi
+          if [[ "$BUCKET_INPUT" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] && [[ "$BUCKET_INPUT" != *".."* ]]; then
+            KB_BUCKET="$BUCKET_INPUT"
+            say "ok: bucket configurado -> $KB_BUCKET"
+            break
+          else
+            warn "$MSG_KB_INVALID"
+          fi
+        done
+        ;;
+      *)
+        say "$MSG_KB_SKIPPED"
+        ;;
+    esac
+  else
+    say "$MSG_KB_SKIPPED"
+  fi
 fi
 
 if [ -n "$KB_BUCKET" ]; then
+  mkdir -p "$KIRO_DIR/noc-guard"
+  echo "$KB_BUCKET" > "$KB_CONFIG_FILE"
   if [ "$LANG_CHOICE" = "1" ]; then
     export KB_DIRECTIVE_TEXT="- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET\`. Whenever you successfully diagnose a complex root cause, run \`kb_manager.py --action add\` to auto-document the resolution."
   else
