@@ -1,5 +1,8 @@
 # kiro-noc-guard
 
+[![Latest Release](https://img.shields.io/github/v/release/Casiati/kiro-noc-guard?color=blue&logo=github)](https://github.com/Casiati/kiro-noc-guard/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 [🇧🇷 Leia em Português](#-kiro-noc-guard-pt-br) | [🇺🇸 Read in English](#-kiro-noc-guard-en)
 
 ## 🇧🇷 kiro-noc-guard (PT-BR)
@@ -45,6 +48,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
 ./install.sh
 ```
 *O instalador cria a estrutura em `~/.kiro/noc-guard`, checa requisitos, roda os testes de segurança e só então grava a configuração do agente.*
+*(Ou baixe o pacote pronto diretamente na [página de Releases](https://github.com/Casiati/kiro-noc-guard/releases/latest)).*
 
 ### 🛠️ Como testar e auditar regras
 A segurança do guard é garantida pelo gerador `generate_allowlist.py`, que roda uma suíte com ~150 testes para certificar que não há vulnerabilidades de bypass.
@@ -99,6 +103,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
 ./install.sh
 ```
 *The installer creates the `~/.kiro/noc-guard` isolation structure, checks prerequisites, runs the test suite, and then safely scaffolds the config.*
+*(Or download the pre-packaged archive directly from the [Releases page](https://github.com/Casiati/kiro-noc-guard/releases/latest)).*
 
 ### 🛠️ Testing & Modifying Rules
 Security is enforced by the python generator (`generate_allowlist.py`), containing ~150 test cases to prevent bypass vulnerabilities.
