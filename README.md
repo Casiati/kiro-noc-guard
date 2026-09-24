@@ -4,270 +4,106 @@
 
 ## 🇧🇷 kiro-noc-guard (PT-BR)
 
-Agente **read-only** para o [Kiro CLI](https://kiro.dev) voltado a analise de incidentes:
-diagnóstico e análise intensiva de logs e métricas **sem prompt de aprovação a cada
-comando**, com trava explícita para qualquer coisa que altere estado.
+Agente focado em incidentes para o [Kiro CLI](https://kiro.dev), configurado para ser ágil na leitura (diagnósticos) e extremamente seguro na mutação.
 
-## Visão geral
+Em triagem de incidentes, confirmar cada comando de leitura custa tempo, mas liberar todas as permissões (`--trust-all-tools`) transforma o assistente num risco (ex: um `aws ec2 terminate-instances` sugerido com confiança). Este projeto resolve isso com listas de permissão estritas e extensamente testadas.
 
-Em triagem de incidente, cada confirmação de tool custa tempo. Mas liberar tudo
-(`--trust-all-tools`) transforma o assistente em risco operacional: basta um `rm -rf`
-ou um `aws ec2 terminate-instances` sugerido com confiança.
+### ✨ Principais Funcionalidades
+- **Auto-instalador Inteligente**: Detecta dependências ausentes e oferece instalação via `winget`, `apt-get`, `dnf` ou `pip`. Suporta Windows (PowerShell) e Linux/macOS.
+- **S3 Knowledge Base**: Faça buscas automáticas em runbooks Markdown armazenados no S3. O agente aprende com seus procedimentos internos de forma nativa e sem expor dados.
+- **CloudTrail Skill**: Um script Python (`search_trail.py`) ultrarrápido para buscas no AWS CloudTrail, com fallback automático integrado caso o pacote `boto3` não exista.
 
-Este projeto resolve os dois lados com um allowlist **explícito e testado** de comandos
-de leitura, mais um denylist de bloqueio duro. O resultado:
+### 🛡️ Arquitetura de Segurança (As 3 Camadas)
 
-- Consultas de log, métrica, estado de recurso e pipelines de shell rodam direto.
-- Mutação (`create/delete/update/put/modify/terminate/start/stop/reboot`, `rm`,
-  `systemctl restart`, `kubectl delete`, escrita em disco) **para e pede seu "sim"**,
-  mesmo que o profile AWS tenha permissão de escrita.
-- Um punhado de comandos catastróficos locais é bloqueado de forma dura, sem opção
-  de confirmar.
+O Kiro CLI avalia as chamadas nesta ordem: `DENY` → `AUTO` → `PROMPT`.
 
-O que é versionado aqui: a config do agente, a diretriz de comportamento (*steering*)
-e o gerador das listas de permissão com sua suíte de testes.
+#### 1. AUTO — Roda sem confirmação
+Ferramentas de leitura e consultas rodam direto, garantindo agilidade no troubleshooting.
+- **Shell**: Mais de 100 padrões cobrindo Texto/Log (`cat, grep, rg, jq`), Filesystem (`ls, df, find`), Sistema (`ps, free, lsof`), Rede (`curl, ping, dig`), Serviços (`systemctl status`), Containers (`docker ps, kubectl get/logs/describe`).
+- **AWS CLI**: Somente verbos seguros: `describe-*, get-*, list-*, filter-*, lookup-*, query-*`, `s3 ls`, `logs tail`.
+- **Encadeamento Seguro**: Pipes (`|`) e lógicos (`&&`, `;`) são permitidos **somente** entre comandos que já são de leitura (ex: `cat log | grep ERROR` passa direto; `cat log && rm -f file` é barrado).
 
-## Arquitetura de segurança (as 3 camadas)
+#### 2. PROMPT — Exige aprovação explícita (y/N)
+Qualquer comando de mutação ou escrita pausa a execução. Mesmo que seu profile AWS tenha permissão de admin, o Kiro vai exigir um "sim" explícito para:
+- Escrita local: `rm, touch, cp, mv, sed -i, >`
+- Mutação Nuvem/Infra: `aws ec2 terminate-instances`, `aws s3 cp`, `kubectl delete/exec`, `docker exec`, `systemctl restart`, `git push`.
 
-O Kiro CLI avalia, para cada chamada de ferramenta, nesta ordem:
-`deniedCommands` → `allowedCommands` → default (pedir aprovação). Bloqueio vence
-liberação (verificado empiricamente, não só pela documentação).
+#### 3. DENY — Bloqueio duro
+Comandos catastróficos que nem sequer oferecem a opção de confirmação:
+- `rm -rf /`, `mkfs`, fork bombs (`:(){...};:`), escapes perigosos de shell (`$(...)`).
 
-### 1. AUTO — executa sem confirmação
-
-Ferramentas de leitura liberadas em `allowedTools`: `read`, `grep`, `glob`, `code`,
-`introspect`, `knowledge`, `web_search` e afins. **`shell`, `aws` e `write` ficam
-deliberadamente fora** — se estivessem ali, aprovariam *qualquer* uso dessas
-ferramentas, inclusive destrutivo.
-
-No shell, ~119 padrões cobrem:
-
-| Categoria | Exemplos |
-|---|---|
-| Texto e log | `cat zcat zgrep grep rg tail head wc sort uniq cut tr awk jq column strings xxd` |
-| Filesystem | `ls stat file du df find lsblk findmnt` |
-| Sistema | `ps ss lsof free vmstat iostat dmesg uptime uname` |
-| Rede | `dig nslookup host curl ping -c traceroute whois` |
-| Serviços | `journalctl`, `systemctl status/is-active/list-units/show`, `nginx -t` |
-| Containers | `docker ps/logs/inspect/stats/events`, `kubectl get/describe/logs/top/explain` |
-| Git | `status log diff show blame ls-files rev-parse`, `branch -a`, `remote -v` |
-| AWS | verbos `describe- get- list- filter- lookup- search- head- batch-get- query- scan-`, `logs tail`, `s3 ls`, `s3api list/get/head-*`, `sts get-caller-identity`, `ce get-*` |
-
-Encadeamento com `|`, `&&`, `;` e `||` é liberado **somente entre segmentos que já são
-de leitura**. `cat app.log \| grep ERROR \| awk '{print $7}' \| sort \| uniq -c \| head`
-roda direto; `cat app.log && rm -f evidencia.txt` não.
-
-Na ferramenta `aws` (chamada estruturada, sem shell), vale
-`toolsSettings.aws.autoAllowReadonly: true` **sem** `allowedServices` — listar um
-serviço ali liberaria também as escritas dele.
-
-Três liberações são exceções conscientes à regra "nada com verbo de mutação", todas
-documentadas no gerador:
-
-- `aws logs start-query` / `stop-query` — abrem e encerram consulta do CloudWatch Logs
-  Insights; não mudam infraestrutura nem dados.
-- `aws eks update-kubeconfig` — escreve apenas no `~/.kube/config` local.
-- `kubectl` com whitelist **fechada** de flags globais (`--context`, `-n`,
-  `--kubeconfig`, ...) antes de um subcomando de leitura; `exec`, `delete`, `apply`,
-  `patch`, `scale`, `drain`, `port-forward` não casam.
-
-### 2. PROMPT — exige confirmação explícita
-
-Tudo que não casa com nenhuma lista cai aqui, inclusive:
-
-```
-rm  touch  cp  mv  sed -i  tee  >  >>            # escrita local
-aws ec2 terminate-instances | stop-instances | create-tags | modify-*
-aws rds delete-db-instance | reboot-db-instance
-aws s3 cp | rm | sync       aws ssm put-parameter | send-command
-aws logs delete-log-group | put-retention-policy
-systemctl restart  docker exec  kubectl delete | exec | rollout restart
-git commit | push | checkout        curl -X POST | -d | -o      wget
-```
-
-A ferramenta `write` do Kiro também está aqui, com `deniedPaths` em `~/.aws/**`,
-`~/.ssh/**`, `/etc/**` e `~/.kiro/agents/**` (trava de automodificação: o agente não
-reescreve as próprias permissões).
-
-### 3. DENY — bloqueio duro, sem opção de confirmar
-
-```
-rm -rf / | /etc | /usr | ~ | --no-preserve-root
-mkfs*  dd of=/dev/*  shred  fdisk  parted  wipefs  > /dev/sd*
-shutdown  reboot  poweroff  halt  init 0|6     :(){ ... };:   (fork bomb)
-chmod|chown -R em / e diretórios de sistema
-journalctl --vacuum|--rotate|--flush           truncate em /var/log
-find -delete | -exec        awk system()       sort|jq -o|--output
-$(...)   `...`   <(...)     (substituição de comando em argumento)
-```
-
-Cada regra vale no início do comando **e** depois de `;`, `&&` ou `|`, com ou sem
-`sudo` e com ou sem caminho absoluto (`/bin/rm`).
-
-### Por que os padrões são assim
-
-- O motor de regex do Kiro é o crate `regex` do Rust: **não há lookahead/lookbehind**.
-  Nada de `(?!...)`; a segurança vem de allowlists fechadas.
-- Argumentos de cada segmento recusam metacaracteres de shell
-  (`;` `&` `|` `>` `<` backtick), o que impede pendurar mutação depois de um comando
-  de leitura. `$` é permitido (necessário para `awk '{print $7}'`) e `$(` cai no DENY.
-- Filtrar por substring não funciona neste domínio: `--output` contém `put` e
-  `--start-time` contém `start`. Uma regra "bloquear tudo que contenha put/start"
-  mataria justamente `aws logs filter-log-events --start-time ... --output json`.
-  Por isso os padrões são ancorados no verbo da operação.
-
-## Pré-requisitos
-
-| Ferramenta | Obrigatória | Para quê |
-|---|---|---|
-| `kiro-cli` | sim (uso) | executa o agente |
-| `python3` ≥ 3.8 | sim | gerador e suíte de testes |
-| `aws` CLI v2 | opcional | consultas AWS |
-| `kubectl` | opcional | consultas em Kubernetes |
-| `docker`, `jq` | opcional | inspeção de containers e JSON |
-
-As ferramentas opcionais ausentes apenas deixam os padrões correspondentes inertes.
-
-### Instalação
+### 🚀 Instalação
 
 ```bash
 git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
 
-# Para Linux / macOS / Git Bash:
-./install.sh
-
-# Para Windows nativo (PowerShell):
+# Windows (PowerShell):
 .\install.ps1
+
+# Linux / macOS / Git Bash:
+./install.sh
 ```
+*O instalador cria a estrutura em `~/.kiro/noc-guard`, checa requisitos, roda os testes de segurança e só então grava a configuração do agente.*
 
-O instalador:
-
-1. checa pré-requisitos;
-2. cria `~/.kiro/{agents,steering,noc-guard}`;
-3. faz backup datado de um `noc-guard.json`/steering já existente;
-4. copia o steering e o gerador, ajustando caminhos para o `$HOME` atual;
-5. instala `agents/noc-guard.json.template` como `~/.kiro/agents/noc-guard.json`;
-6. roda a suíte de testes e **só então** grava as listas de permissão;
-7. valida com `kiro-cli agent validate` e confere que `shell`/`aws` não estão em
-   `allowedTools`;
-8. pergunta se deve rodar `kiro-cli agent set-default noc-guard`.
-
-Opções: `--yes` (define o default sem perguntar), `--no-default` (não mexe no default),
-`KIRO_DIR=/tmp/sandbox ./install.sh --no-default` (instala fora do `~/.kiro`, útil para
-testar).
-
-Sem alterar seu agente default, dá para usar pontualmente:
-
+### 🛠️ Como testar e auditar regras
+A segurança do guard é garantida pelo gerador `generate_allowlist.py`, que roda uma suíte com ~150 testes para certificar que não há vulnerabilidades de bypass.
 ```bash
-kiro-cli chat --agent noc-guard
-```
-
-## Como testar e auditar
-
-Rode a suíte antes de aplicar qualquer coisa — ela classifica ~143 comandos reais nas
-três camadas e falha se algum sair do esperado:
-
-```bash
+# Rodar a suíte de testes (sem alterar o agente)
 python3 scripts/generate_allowlist.py --check
-# testes: 143  falhas: 0  (padroes: 119 allow / 33 deny)
 ```
+Se precisar liberar um novo comando de leitura, adicione-o no gerador (`generate_allowlist.py`) e rode os testes. Isso garante que injeções perigosas continuem bloqueadas e seu ambiente seguro.
 
-`--check` **não escreve** no agente. Sem `--check`, o script só grava depois de 0 falhas.
-Para aplicar num arquivo específico: `--agent ~/.kiro/agents/noc-guard.json`.
-
-Ao adicionar um comando, inclua-o também na lista `AUTO`, `PROMPT` ou `DENY_T` do
-próprio script — é a suíte que garante que a mudança não abriu um buraco. Casos de
-contorno já cobertos: `| xargs rm`, `bash -c 'rm ...'`, `FOO=bar rm -rf`,
-`/bin/rm -rf /usr`, `cat a && rm -rf /`, `aws describe... ; aws terminate...`.
-
-Inspeção do que está ativo:
-
-```bash
-kiro-cli agent validate --path ~/.kiro/agents/noc-guard.json
-python3 -c "import json;s=json.load(open('$HOME/.kiro/agents/noc-guard.json'))['toolsSettings']['shell'];print(len(s['allowedCommands']),'allow /',len(s['deniedCommands']),'deny')"
-```
-
-Quando um comando de leitura legítimo for barrado, o caminho certo é adicioná-lo ao
-gerador e rodar a suíte — não relaxar a config à mão.
-
-## Estrutura do repositório
-
-```
-.
-├── agents/noc-guard.json.template     # config base do agente (sem as listas geradas)
-├── scripts/generate_allowlist.py    # gerador das listas + suíte de testes
-├── skills/                          # scripts adicionais (como a busca no CloudTrail)
-├── steering/noc-readonly-first.md   # diretriz de comportamento (sempre no contexto)
-├── install.sh                       # instalador idempotente, com backup
-├── install.ps1                      # instalador PowerShell (Windows nativo)
-├── .gitignore
-└── README.md
-```
-
-## Limitações conhecidas
-
-- O `allowedCommands` de encadeamento é um único padrão gerado (~13 KB). Ele é legível
-  pelo gerador, não a olho nu no JSON.
-- A camada PROMPT depende de o assistente perguntar. Em modo `--no-interactive` não há
-  quem aprove: a chamada é recusada, o que é o comportamento seguro.
-- Testado no Kiro CLI em Linux. `%USERPROFILE%\.kiro` (Windows) não foi validado.
-
-## Aviso
-
-Isto é uma camada de **redução de risco operacional**, não um sandbox. Ela não
-substitui permissões IAM restritas: o correto continua sendo usar profiles AWS
-read-only para triagem. O guard existe para o caso de um profile com escrita chegar
-por engano até a sessão.
-
-## Licença
-
-Distribuído sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
-
-## Skill: Busca Rápida no CloudTrail
-
-O `noc-guard` inclui um script Python customizado (`search_trail.py`) que resolve a lentidão e as limitações de paginação do `aws cloudtrail lookup-events`.
-
-Exemplos de uso que o agente executa automaticamente:
-- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --since 2h`
-- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --event-name StopInstances --since 24h`
-- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile NOME-DO-PROFILE --errors-only`
-<br><hr>
+---
 
 ## 🇺🇸 kiro-noc-guard (EN)
 
-**Read-only** agent configuration for [Kiro CLI](https://kiro.dev), tailored for Incident Response and NOC (Network Operations Center) environments. It enables fast diagnostics, log diving, and metric analysis **without prompting for approval on every command**, while maintaining a hard stop for any state-altering commands.
+Incident-response focused agent for [Kiro CLI](https://kiro.dev), tuned for fast read-only diagnostics and heavily restricted state mutations.
 
-### The 3-Tier Security Architecture
+In incident triage, confirming every read tool costs time, but granting full trust (`--trust-all-tools`) is an operational risk (e.g., a confidently suggested `aws ec2 terminate-instances`). This project solves this using strict, thoroughly tested allowlists.
 
-The agent strictly enforces three levels of permissions using a generated configuration:
+### ✨ Key Features
+- **Smart Auto-installer**: Detects missing dependencies and offers automatic installation via `winget`, `apt-get`, `dnf` or `pip`. Works seamlessly on Windows (PowerShell) and Linux/macOS.
+- **S3 Knowledge Base**: Sync and automatically search Markdown runbooks stored securely in an S3 bucket. The agent learns from your private procedures without exposing data.
+- **CloudTrail Skill**: A fast, resilient Python script (`search_trail.py`) for optimized AWS CloudTrail searches, featuring automatic fallback if `boto3` is not installed.
 
-1. **AUTO (No confirmation):** Safe, read-only utilities and AWS/Kubernetes queries run instantly. (e.g., `cat`, `grep`, `aws logs filter-log-events`, `kubectl get`, `docker ps`). Safe shell chaining (`|`, `&&`) is allowed ONLY between read-only segments.
-2. **PROMPT (Requires explicit `[y/N]`):** Any mutation or write action (e.g., `rm`, `aws ec2 stop-instances`, `kubectl delete`, `docker restart`). The agent will pause and require manual operator approval, **even if the AWS profile holds write permissions**. 
-3. **DENY (Hard block):** Catastrophic local commands (`rm -rf /`, `mkfs`, fork bombs, command substitution escapes like `$(...)`) are rejected completely.
+### 🛡️ Security Architecture (The 3 Tiers)
 
-*Note: The steering rules instruct the LLM to output a visual warning (with random monkey emojis 🐒🦍) right before proposing a mutating command to prevent operator approval fatigue.*
+The agent evaluates tool calls in this order: `DENY` → `AUTO` → `PROMPT`.
 
-### Quick Install
+#### 1. AUTO — No confirmation required
+Read-only utilities and queries execute instantly for fast troubleshooting.
+- **Shell**: Over 100 patterns covering Text/Logs (`cat, grep, rg, jq`), Filesystem (`ls, df, find`), System (`ps, free, lsof`), Network (`curl, ping, dig`), Services (`systemctl status`), and Containers (`docker ps, kubectl get/logs/describe`).
+- **AWS CLI**: Safe verbs only: `describe-*, get-*, list-*, filter-*, lookup-*, query-*`, `s3 ls`, `logs tail`.
+- **Safe Chaining**: Pipes (`|`) and logical operators (`&&`, `;`) are allowed **ONLY** between read-only commands (e.g., `cat log | grep ERROR` runs; `cat log && rm -f file` is blocked).
+
+#### 2. PROMPT — Requires explicit `[y/N]` approval
+Any mutating command pauses execution. Even if your AWS profile holds write permissions, the agent will pause for:
+- Local writes: `rm, touch, cp, mv, sed -i, >`
+- Cloud/Infra mutation: `aws ec2 terminate-instances`, `aws s3 cp`, `kubectl delete/exec`, `docker exec`, `systemctl restart`, `git push`.
+
+#### 3. DENY — Hard block
+Catastrophic local commands are rejected completely without a prompt:
+- `rm -rf /`, `mkfs`, fork bombs (`:(){...};:`), command substitutions (`$(...)`).
+
+### 🚀 Quick Install
 
 ```bash
 git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
 
-# For Linux / macOS / Git Bash:
-./install.sh
-
-# For Windows (PowerShell):
+# Windows (PowerShell):
 .\install.ps1
+
+# Linux / macOS / Git Bash:
+./install.sh
 ```
+*The installer creates the `~/.kiro/noc-guard` isolation structure, checks prerequisites, runs the test suite, and then safely scaffolds the config.*
 
-### Fast CloudTrail Search Skill
-
-Native AWS CLI `cloudtrail lookup-events` is heavily paginated and slow. This project includes a custom Python skill (`search_trail.py`) integrated into the allowlist.
-
-The AI agent will automatically use it like this:
-- `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile MY-PROFILE --since 2h`
-
-### Repository Internals
-- The system prompt (`noc-readonly-first.md`) is written in English to maximize LLM instruction-following capabilities, but forces all conversational output to be in Brazilian Portuguese.
-- The `generate_allowlist.py` uses aggressive Regex to build the configuration for Kiro without lookaheads (supporting the Rust Regex engine).
+### 🛠️ Testing & Modifying Rules
+Security is enforced by the python generator (`generate_allowlist.py`), containing ~150 test cases to prevent bypass vulnerabilities.
+```bash
+# Run test suite to validate rules (dry-run)
+python3 scripts/generate_allowlist.py --check
+```
+When adding a new allowed command, modify the python script and re-run the tests. This ensures edge cases like `good-command && rm -rf /` remain securely blocked.
