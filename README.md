@@ -39,7 +39,7 @@ git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
 
 # Windows (PowerShell):
-.\install.ps1
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
 
 # Linux / macOS / Git Bash:
 ./install.sh
@@ -93,7 +93,7 @@ git clone https://github.com/Casiati/kiro-noc-guard.git
 cd kiro-noc-guard
 
 # Windows (PowerShell):
-.\install.ps1
+Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
 
 # Linux / macOS / Git Bash:
 ./install.sh
