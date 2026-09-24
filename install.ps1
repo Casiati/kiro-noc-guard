@@ -135,21 +135,24 @@ function Die { param([string]$text) Write-Host "`nERRO/ERROR: $text" -Foreground
 
 # Prerequisites
 Step $MSG_REQ
-$hasPython = $false
+# $PY_CMD guarda o nome real do executavel Python resolvido ('python' ou
+# 'python3'). Nao usamos Set-Alias aqui: Start-Process resolve o executavel
+# via Process.Start() do .NET (PATH do sistema operacional), que NAO respeita
+# aliases do PowerShell engine — em maquinas onde so existe python3.exe, um
+# Set-Alias funcionaria para chamadas diretas mas falharia silenciosamente em
+# qualquer Start-Process python (o executavel nao seria encontrado).
+$PY_CMD = $null
 if (Get-Command "python" -ErrorAction SilentlyContinue) {
     if ((python --version 2>&1) -match "Python") {
-        $hasPython = $true
+        $PY_CMD = "python"
     }
 }
-
-if (-not $hasPython) {
-    if (Get-Command "python3" -ErrorAction SilentlyContinue) {
-        if ((python3 --version 2>&1) -match "Python") {
-            Set-Alias python python3
-            $hasPython = $true
-        }
+if (-not $PY_CMD -and (Get-Command "python3" -ErrorAction SilentlyContinue)) {
+    if ((python3 --version 2>&1) -match "Python") {
+        $PY_CMD = "python3"
     }
 }
+$hasPython = [bool]$PY_CMD
 
 # 1. Identifica o que esta faltando antes
 $missingEssential = @()
@@ -175,7 +178,7 @@ foreach ($opt in @("aws", "kubectl", "docker", "jq")) {
 
 $hasBoto = $false
 if ($hasPython) {
-    $testBoto = python -c "import boto3; print('ok')" 2>$null
+    $testBoto = & $PY_CMD -c "import boto3; print('ok')" 2>$null
     if ($testBoto -eq "ok") { $hasBoto = $true }
 }
 if (-not $hasBoto) {
@@ -201,15 +204,21 @@ if ($missingEssential.Count -gt 0 -or $missingOptional.Count -gt 0) {
             if ($hasWinget) {
                 foreach ($item in ($missingEssential + $missingOptional)) {
                     if ($item -eq "boto3") {
-                        if ($hasPython -or (Get-Command "python" -ErrorAction SilentlyContinue)) {
+                        if ($PY_CMD) {
                             Say ($MSG_INSTALLING_PKG -f "boto3 via pip")
-                            Start-Process python -ArgumentList "-m pip install boto3 --quiet" -NoNewWindow -Wait
+                            # Chamada direta (nao Start-Process): usa o $PY_CMD resolvido
+                            # de fato e herda stdout/stderr do console atual.
+                            & $PY_CMD -m pip install boto3 --quiet
                         }
                     } else {
                         $pkg = $WINGET_MAP[$item]
                         if ($pkg) {
                             Say ($MSG_INSTALLING_PKG -f "$item ($pkg)")
-                            Start-Process winget -ArgumentList "install --id $pkg -e --accept-package-agreements --accept-source-agreements" -NoNewWindow -Wait
+                            # Chamada direta: herda stdout/stderr do console
+                            # (winget e um comando unico, sem alias envolvido,
+                            # mas Start-Process sem redirecionamento ainda
+                            # ocultaria erros de instalacao do usuario).
+                            winget install --id $pkg -e --accept-package-agreements --accept-source-agreements
                         }
                     }
                 }
@@ -222,21 +231,19 @@ if ($missingEssential.Count -gt 0 -or $missingOptional.Count -gt 0) {
     }
 }
 
-# 2. Exibicao final dos pre-requisitos
-$hasPython = $false
+# 2. Exibicao final dos pre-requisitos (reavalia apos possivel instalacao via winget)
+$PY_CMD = $null
 if (Get-Command "python" -ErrorAction SilentlyContinue) {
-    if ((python --version 2>&1) -match "Python") { $hasPython = $true }
+    if ((python --version 2>&1) -match "Python") { $PY_CMD = "python" }
 }
-if (-not $hasPython -and (Get-Command "python3" -ErrorAction SilentlyContinue)) {
-    if ((python3 --version 2>&1) -match "Python") {
-        Set-Alias python python3
-        $hasPython = $true
-    }
+if (-not $PY_CMD -and (Get-Command "python3" -ErrorAction SilentlyContinue)) {
+    if ((python3 --version 2>&1) -match "Python") { $PY_CMD = "python3" }
 }
+$hasPython = [bool]$PY_CMD
 if (-not $hasPython) {
     Die $MSG_NO_PY
 }
-$pyver = (python --version 2>&1)
+$pyver = (& $PY_CMD --version 2>&1)
 Say "python      $pyver"
 
 $HAS_KIRO = $false
@@ -255,7 +262,7 @@ foreach ($opt in @("aws", "kubectl", "docker", "jq")) {
     }
 }
 
-$hasBoto = python -c "import boto3; print('ok')" 2>$null
+$hasBoto = & $PY_CMD -c "import boto3; print('ok')" 2>$null
 if ($hasBoto -eq "ok") {
     Say "boto3        $MSG_OPT_OK"
 } else {
@@ -346,8 +353,13 @@ if ($EXISTING_BUCKET) {
 if ($KB_BUCKET) {
     $nocGuardDir = Join-Path $KIRO_DIR "noc-guard"
     if (-not (Test-Path $nocGuardDir)) { New-Item -ItemType Directory -Path $nocGuardDir -Force | Out-Null }
-    Set-Content -Path $KB_CONFIG_FILE -Value $KB_BUCKET -Encoding utf8
-    if ($langChoice -eq "1") {
+    # Set-Content -Encoding utf8 grava BOM no Windows PowerShell 5.1 (qualquer encoding
+    # Unicode exceto UTF7 sempre cria BOM nessa versao). O BOM (U+FEFF) nao e removido
+    # por .Trim() na releitura via Get-Content -Raw, contaminando $EXISTING_BUCKET em
+    # reinstalacoes futuras. [System.IO.File]::WriteAllText com UTF8Encoding($false)
+    # grava sem BOM de forma identica em PS 5.1 e PS 7+.
+    [System.IO.File]::WriteAllText($KB_CONFIG_FILE, $KB_BUCKET, [System.Text.UTF8Encoding]::new($false))
+    if ($LANG_CHOICE -ne "2") {
         $env:KB_DIRECTIVE_TEXT = "- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Whenever you successfully diagnose a complex root cause, run ``kb_manager.py --action add`` to auto-document the resolution."
     } else {
         $env:KB_DIRECTIVE_TEXT = "- Para consultar ou registrar aprendizados na Base de Conhecimento / Runbooks compartilhados da equipe, utilize o script: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Sempre que diagnosticar com sucesso a causa raiz de um incidente complexo, execute ``kb_manager.py --action add`` para auto-documentar a resolucao."
@@ -427,7 +439,7 @@ p.write_text(content, encoding='utf-8')
 foreach ($f in @($STEERING_FILE, $GEN_FILE, $NEW_AGENT)) {
     $content = Get-Content $f -Raw -Encoding UTF8
     if ($content -match "__HOME__|__LANGUAGE_RULE__|__KB_DIRECTIVE__") {
-        $py_script | python - $f $HOME_FWD
+        $py_script | & $PY_CMD - $f $HOME_FWD
         Say "-> configured variables in $(Split-Path $f -Leaf)"
     }
 }
@@ -435,8 +447,12 @@ Say $MSG_PATHS_OK
 
 # Tests + Allowlist
 Step $MSG_RUN_TESTS
-$p = Start-Process python -ArgumentList "`"$GEN_FILE`" --agent `"$NEW_AGENT`"" -NoNewWindow -Wait -PassThru
-if ($p.ExitCode -ne 0) {
+# Chamada direta (nao Start-Process): usa o $PY_CMD resolvido de fato, herda
+# stdout/stderr do console atual (evita silenciar a saida de testes/falhas —
+# Start-Process sem -RedirectStandardOutput/-RedirectStandardError descarta
+# tudo que o processo filho imprime) e permite checar $LASTEXITCODE direto.
+& $PY_CMD $GEN_FILE --agent $NEW_AGENT
+if ($LASTEXITCODE -ne 0) {
     Remove-Item $NEW_AGENT -ErrorAction SilentlyContinue
     Die $MSG_ERR_TESTS
 }
@@ -447,13 +463,16 @@ cfg = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
 sh = cfg['toolsSettings']['shell']
 print(f"  AUTO: {len(sh['allowedCommands'])} | DENY: {len(sh['deniedCommands'])} | TOOLS: {len(cfg['allowedTools'])}")
 "@
-$py_val | python - $NEW_AGENT
+$py_val | & $PY_CMD - $NEW_AGENT
 
 # Validation
 if ($HAS_KIRO) {
     Step $MSG_VAL_KIRO
-    $p = Start-Process kiro-cli -ArgumentList "agent validate --path `"$NEW_AGENT`"" -NoNewWindow -Wait -PassThru
-    if ($p.ExitCode -eq 0) {
+    # Chamada direta: herda stdout/stderr do console (Start-Process sem
+    # redirecionamento explicito descartaria a saida de 'kiro-cli agent validate',
+    # ocultando do usuario o motivo exato de uma eventual rejeicao de config).
+    kiro-cli agent validate --path $NEW_AGENT
+    if ($LASTEXITCODE -eq 0) {
         Say $MSG_VALID
     } else {
         Remove-Item $NEW_AGENT -ErrorAction SilentlyContinue
