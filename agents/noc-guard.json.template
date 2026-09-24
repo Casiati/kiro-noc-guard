@@ -43,5 +43,13 @@
   },
   "resources": [
     "file://__HOME__/.kiro/noc-guard/steering/**/*.md"
-  ]
+  ],
+  "hooks": {
+    "stop": [
+      {
+        "command": "python3 __HOME__/.kiro/noc-guard/skills/stop-hook/kb_reminder.py",
+        "timeout_ms": 5000
+      }
+    ]
+  }
 }

@@ -55,6 +55,12 @@ if [ "$LANG_CHOICE" = "2" ]; then
   MSG_KB_PROMPT="Informe o nome completo do Bucket S3 (ex: noc-runbooks-123456789012-us-east-1): "
   MSG_KB_INVALID="Nome de bucket inválido! Deve ter entre 3 e 63 caracteres (letras minúsculas, números, hífens e pontos; sem '..')."
   MSG_KB_SKIPPED="Base de Conhecimento não ativada (pode ser configurada depois)."
+  MSG_KB_PROFILE_DESC="O bucket da Base de Conhecimento costuma estar numa conta AWS separada da conta de cada cliente/incidente investigado. Se o profile usado na investigação não tiver acesso a esse bucket, informe aqui o profile AWS (de ~/.aws/config) dedicado a essa conta — deixe em branco para usar o profile padrão do ambiente (AWS_PROFILE/default)."
+  MSG_KB_PROFILE_EXISTING="Profile AWS configurado atualmente para a Base de Conhecimento: %s"
+  MSG_KB_PROFILE_KEEP_PROMPT="Deseja manter o profile atual [%s]? [S/n/trocar] (Enter para manter): "
+  MSG_KB_PROFILE_PROMPT="Informe o nome do profile AWS para acessar o bucket da KB (Enter para não usar nenhum e cair no padrão do ambiente): "
+  MSG_KB_PROFILE_SET="ok: profile da KB configurado -> %s"
+  MSG_KB_PROFILE_SKIPPED="Nenhum profile dedicado configurado para a KB — usará o padrão do ambiente (AWS_PROFILE/default)."
 
   MSG_BOTO_PROMPT="Deseja instalar o boto3 automaticamente via pip? [s/N] "
   MSG_BOTO_DESC="Benefício: O boto3 é o SDK oficial da AWS para Python. Ele faz consultas diretas na API em memória, tornando a busca no CloudTrail mais rápida e precisa do que via CLI."
@@ -114,6 +120,12 @@ else
   MSG_KB_PROMPT="Enter the full S3 Bucket name (e.g., noc-runbooks-123456789012-us-east-1): "
   MSG_KB_INVALID="Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
   MSG_KB_SKIPPED="Knowledge Base skipped (can be configured later)."
+  MSG_KB_PROFILE_DESC="The Knowledge Base bucket usually lives in an AWS account separate from each client/incident account being investigated. If the profile used during the investigation lacks access to that bucket, enter here the AWS profile (from ~/.aws/config) dedicated to that account — leave blank to use the environment's default profile (AWS_PROFILE/default)."
+  MSG_KB_PROFILE_EXISTING="Currently configured AWS profile for the Knowledge Base: %s"
+  MSG_KB_PROFILE_KEEP_PROMPT="Keep current profile [%s]? [Y/n/change] (Enter to keep): "
+  MSG_KB_PROFILE_PROMPT="Enter the AWS profile name to access the KB bucket (Enter to use none and fall back to the environment default): "
+  MSG_KB_PROFILE_SET="ok: KB profile configured -> %s"
+  MSG_KB_PROFILE_SKIPPED="No dedicated profile configured for the KB — will use the environment default (AWS_PROFILE/default)."
 
   MSG_BOTO_PROMPT="Would you like to install boto3 automatically via pip? [y/N] "
   MSG_BOTO_DESC="Benefit: boto3 is the official AWS SDK for Python. It makes direct in-memory API queries, making CloudTrail searches faster and more accurate than via CLI."
@@ -289,7 +301,8 @@ fi
 step "$MSG_VAL_REPO"
 for f in "$REPO_DIR/scripts/generate_allowlist.py" \
          "$REPO_DIR/steering/noc-readonly-first.md" \
-         "$REPO_DIR/agents/noc-guard.json.template"; do
+         "$REPO_DIR/agents/noc-guard.json.template" \
+         "$REPO_DIR/skills/stop-hook/kb_reminder.py"; do
   [ -f "$f" ] || die "$MSG_ERR_MISSING $f"
   say "ok  ${f#"$REPO_DIR"/}"
 done
@@ -379,13 +392,98 @@ else
   fi
 fi
 
+# ------------------------------------------------- profile AWS da KB (opcional)
+# Independente do bucket: o profile usado para acessar o bucket da KB é
+# tipicamente distinto do profile resolvido para cada cliente/incidente
+# investigado (contas AWS diferentes). Persistido separadamente do bucket
+# para permitir trocar um sem afetar o outro, e é sempre OPCIONAL — sem ele,
+# kb_manager.py cai no comportamento padrão (AWS_PROFILE/default do ambiente).
+KB_PROFILE_CONFIG_FILE="$KIRO_DIR/noc-guard/.kb_profile"
+EXISTING_KB_PROFILE=""
+if [ -n "$KB_BUCKET" ] && [ -f "$KB_PROFILE_CONFIG_FILE" ]; then
+  EXISTING_KB_PROFILE="$(cat "$KB_PROFILE_CONFIG_FILE" 2>/dev/null | tr -d '[:space:]')"
+fi
+
+KB_PROFILE=""
+if [ -n "$KB_BUCKET" ]; then
+  if [ -n "$EXISTING_KB_PROFILE" ]; then
+    say "$(printf "$MSG_KB_PROFILE_EXISTING" "$EXISTING_KB_PROFILE")"
+    if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+      read -r -p "$(printf "$MSG_KB_PROFILE_KEEP_PROMPT" "$EXISTING_KB_PROFILE")" KEEP_PROFILE_ANS < /dev/tty || KEEP_PROFILE_ANS=""
+      case "$KEEP_PROFILE_ANS" in
+        ""|[sSyY]*)
+          KB_PROFILE="$EXISTING_KB_PROFILE"
+          say "$(printf "$MSG_KB_PROFILE_SET" "$KB_PROFILE")"
+          ;;
+        [tT]*|[cC]*)
+          read -r -p "$MSG_KB_PROFILE_PROMPT" PROFILE_INPUT < /dev/tty || PROFILE_INPUT=""
+          PROFILE_INPUT="$(echo "$PROFILE_INPUT" | tr -d '[:space:]')"
+          if [ -n "$PROFILE_INPUT" ]; then
+            KB_PROFILE="$PROFILE_INPUT"
+            say "$(printf "$MSG_KB_PROFILE_SET" "$KB_PROFILE")"
+          else
+            say "$MSG_KB_PROFILE_SKIPPED"
+            rm -f "$KB_PROFILE_CONFIG_FILE" 2>/dev/null || true
+          fi
+          ;;
+        *)
+          say "$MSG_KB_PROFILE_SKIPPED"
+          rm -f "$KB_PROFILE_CONFIG_FILE" 2>/dev/null || true
+          ;;
+      esac
+    else
+      KB_PROFILE="$EXISTING_KB_PROFILE"
+      say "$(printf "$MSG_KB_PROFILE_SET" "$KB_PROFILE")"
+    fi
+  else
+    say "$MSG_KB_PROFILE_DESC"
+    if [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+      read -r -p "$MSG_KB_PROFILE_PROMPT" PROFILE_INPUT < /dev/tty || PROFILE_INPUT=""
+      PROFILE_INPUT="$(echo "$PROFILE_INPUT" | tr -d '[:space:]')"
+      if [ -n "$PROFILE_INPUT" ]; then
+        KB_PROFILE="$PROFILE_INPUT"
+        say "$(printf "$MSG_KB_PROFILE_SET" "$KB_PROFILE")"
+      else
+        say "$MSG_KB_PROFILE_SKIPPED"
+      fi
+    else
+      say "$MSG_KB_PROFILE_SKIPPED"
+    fi
+  fi
+fi
+
+if [ -n "$KB_PROFILE" ]; then
+  mkdir -p "$KIRO_DIR/noc-guard"
+  echo "$KB_PROFILE" > "$KB_PROFILE_CONFIG_FILE"
+fi
+
 if [ -n "$KB_BUCKET" ]; then
   mkdir -p "$KIRO_DIR/noc-guard"
   echo "$KB_BUCKET" > "$KB_CONFIG_FILE"
+  KB_PROFILE_FLAG=""
+  if [ -n "$KB_PROFILE" ]; then
+    KB_PROFILE_FLAG=" --kb-profile $KB_PROFILE"
+  fi
   if [ "$LANG_CHOICE" != "2" ]; then
-    export KB_DIRECTIVE_TEXT="- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET\`. Whenever you successfully diagnose a complex root cause, run \`kb_manager.py --action add\` to auto-document the resolution."
+    export KB_DIRECTIVE_TEXT="## Final Checklist — Knowledge Base (NEXT)
+
+Before ending EVERY response where you investigated an AWS/K8s/infra incident, check:
+
+1. Did this investigation involve 3+ read commands (AWS/logs/metrics/kubectl) AND did you reach an explicit conclusion (root cause identified, OR confirmed false positive, OR clear recommendation)?
+2. If YES to #1: your NEXT action, before finishing, MUST be running \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action add --alert \"<short alert/topic name>\" --content \"<concise summary: root cause, evidence, recommendation>\"\`. Do this silently as part of your workflow, then mention in your final answer that the finding was recorded.
+3. If NO (quick lookup, single command, no conclusion reached): skip this step, no need to mention it.
+
+To search the Knowledge Base for prior similar incidents, use: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query \"<term>\"\`."
   else
-    export KB_DIRECTIVE_TEXT="- Para consultar ou registrar aprendizados na Base de Conhecimento / Runbooks compartilhados da equipe, utilize o script: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET\`. Sempre que diagnosticar com sucesso a causa raiz de um incidente complexo, execute \`kb_manager.py --action add\` para auto-documentar a resolução."
+    export KB_DIRECTIVE_TEXT="## Checklist Final — Base de Conhecimento (PRÓXIMO PASSO)
+
+Antes de finalizar TODA resposta em que você investigou um incidente de AWS/K8s/infra, verifique:
+
+1. Essa investigação envolveu 3 ou mais comandos de leitura (AWS/logs/métricas/kubectl) E você chegou a uma conclusão explícita (causa raiz identificada, OU falso positivo confirmado, OU recomendação clara)?
+2. Se SIM ao item 1: sua PRÓXIMA ação, antes de terminar, DEVE ser executar \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action add --alert \"<nome curto do alerta/tópico>\" --content \"<resumo conciso: causa raiz, evidências, recomendação>\"\`. Faça isso silenciosamente como parte do seu fluxo, depois mencione na resposta final que o achado foi registrado.
+3. Se NÃO (consulta rápida, comando único, sem conclusão): pule esta etapa, sem necessidade de mencioná-la.
+
+Para pesquisar na Base de Conhecimento por incidentes semelhantes anteriores, utilize: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query \"<termo>\"\`."
   fi
 else
   export KB_DIRECTIVE_TEXT=""
@@ -393,7 +491,7 @@ fi
 
 # ------------------------------------------------------------------ diretórios
 step "$MSG_MKDIR $KIRO_DIR"
-for d in agents noc-guard noc-guard/steering noc-guard/skills/cloudtrail-search noc-guard/skills/knowledge-builder noc-guard/kb; do
+for d in agents noc-guard noc-guard/steering noc-guard/skills/cloudtrail-search noc-guard/skills/knowledge-builder noc-guard/skills/stop-hook noc-guard/kb; do
   mkdir -p "$KIRO_DIR/$d"
   say "$KIRO_DIR/$d"
 done
@@ -429,6 +527,8 @@ install -m 0755 "$REPO_DIR/skills/cloudtrail-search/search_trail.py" "$KIRO_DIR/
 say "skill (cloudtrail) -> $KIRO_DIR/noc-guard/skills/cloudtrail-search/search_trail.py"
 install -m 0755 "$REPO_DIR/skills/knowledge-builder/kb_manager.py" "$KIRO_DIR/noc-guard/skills/knowledge-builder/kb_manager.py"
 say "skill (knowledge)  -> $KIRO_DIR/noc-guard/skills/knowledge-builder/kb_manager.py"
+install -m 0755 "$REPO_DIR/skills/stop-hook/kb_reminder.py" "$KIRO_DIR/noc-guard/skills/stop-hook/kb_reminder.py"
+say "hook (stop)  -> $KIRO_DIR/noc-guard/skills/stop-hook/kb_reminder.py"
 
 NEW_AGENT="$AGENT_FILE.new-$STAMP"
 trap 'rm -f "$NEW_AGENT"' EXIT

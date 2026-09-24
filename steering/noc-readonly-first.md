@@ -18,7 +18,6 @@ This machine is a **NOC incident triage** station. The usage of kiro-cli here is
 - Use targeted queries: always include a time window (`--start-time`/`--since`), `--filter-pattern`, and `--max-items`/`--limit` to avoid pulling unnecessary volume.
 - Always include the appropriate `--profile` parameter for the environment you are analyzing when running AWS commands.
 - To search CloudTrail logs, NEVER use the native CLI. ALWAYS execute the script `python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py`.
-__KB_DIRECTIVE__
 - If a legitimate read command is blocked because it is not on the allowlist, output which command was blocked and suggest regenerating the allowlist using `python3 ~/.kiro/noc-guard/generate_allowlist.py`.
 
 ## Rules for Mutation Commands / Confirmation
@@ -28,3 +27,4 @@ __LANGUAGE_RULE__
 Whenever a mutation or state-altering command is necessary, you MUST render a short visual alert for the operator. To prevent visual fatigue, vary the emojis in each warning by randomly picking one of: 🐒, 🐵, 🫏, 🦍, 🦧. Follow EXACTLY the pattern below and do not add anything else before attempting to run the tool (Kiro will pause for native confirmation right after your message):
 
 __ALERT_TEMPLATE__
+__KB_DIRECTIVE__

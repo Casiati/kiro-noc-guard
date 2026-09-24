@@ -55,6 +55,12 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_KB_PROMPT = "Informe o nome completo do Bucket S3 (ex: noc-runbooks-123456789012-us-east-1): "
     $MSG_KB_INVALID = "Nome de bucket invalido! Deve ter entre 3 e 63 caracteres (letras minusculas, numeros, hifens e pontos; sem '..')."
     $MSG_KB_SKIPPED = "Base de Conhecimento nao ativada (pode ser configurada depois)."
+    $MSG_KB_PROFILE_DESC = "O bucket da Base de Conhecimento costuma estar numa conta AWS separada da conta de cada cliente/incidente investigado. Se o profile usado na investigacao nao tiver acesso a esse bucket, informe aqui o profile AWS (de ~/.aws/config) dedicado a essa conta - deixe em branco para usar o profile padrao do ambiente (AWS_PROFILE/default)."
+    $MSG_KB_PROFILE_EXISTING = "Profile AWS configurado atualmente para a Base de Conhecimento: {0}"
+    $MSG_KB_PROFILE_KEEP_PROMPT = "Deseja manter o profile atual [{0}]? [S/n/trocar] (Enter para manter): "
+    $MSG_KB_PROFILE_PROMPT = "Informe o nome do profile AWS para acessar o bucket da KB (Enter para nao usar nenhum e cair no padrao do ambiente): "
+    $MSG_KB_PROFILE_SET = "ok: profile da KB configurado -> {0}"
+    $MSG_KB_PROFILE_SKIPPED = "Nenhum profile dedicado configurado para a KB - usara o padrao do ambiente (AWS_PROFILE/default)."
 
     $MSG_BOTO_PROMPT = "Deseja instalar o boto3 automaticamente via pip? [s/N] "
     $MSG_BOTO_DESC = "Beneficio: O boto3 e o SDK oficial da AWS para Python. Ele faz consultas diretas na API em memoria, tornando a busca no CloudTrail mais rapida e precisa do que via CLI."
@@ -109,6 +115,12 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_KB_PROMPT = "Enter the full S3 Bucket name (e.g., noc-runbooks-123456789012-us-east-1): "
     $MSG_KB_INVALID = "Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
     $MSG_KB_SKIPPED = "Knowledge Base skipped (can be configured later)."
+    $MSG_KB_PROFILE_DESC = "The Knowledge Base bucket usually lives in an AWS account separate from each client/incident account being investigated. If the profile used during the investigation lacks access to that bucket, enter here the AWS profile (from ~/.aws/config) dedicated to that account - leave blank to use the environment's default profile (AWS_PROFILE/default)."
+    $MSG_KB_PROFILE_EXISTING = "Currently configured AWS profile for the Knowledge Base: {0}"
+    $MSG_KB_PROFILE_KEEP_PROMPT = "Keep current profile [{0}]? [Y/n/change] (Enter to keep): "
+    $MSG_KB_PROFILE_PROMPT = "Enter the AWS profile name to access the KB bucket (Enter to use none and fall back to the environment default): "
+    $MSG_KB_PROFILE_SET = "ok: KB profile configured -> {0}"
+    $MSG_KB_PROFILE_SKIPPED = "No dedicated profile configured for the KB - will use the environment default (AWS_PROFILE/default)."
 
     $MSG_BOTO_PROMPT = "Would you like to install boto3 automatically via pip? [y/N] "
     $MSG_BOTO_DESC = "Benefit: boto3 is the official AWS SDK for Python. It makes direct in-memory API queries, making CloudTrail searches faster and more accurate than via CLI."
@@ -274,7 +286,8 @@ Step $MSG_VAL_REPO
 $FILES = @(
     "scripts\generate_allowlist.py",
     "steering\noc-readonly-first.md",
-    "agents\noc-guard.json.template"
+    "agents\noc-guard.json.template",
+    "skills\stop-hook\kb_reminder.py"
 )
 foreach ($f in $FILES) {
     $fullPath = Join-Path $REPO_DIR $f
@@ -350,6 +363,66 @@ if ($EXISTING_BUCKET) {
     }
 }
 
+# Profile AWS da KB (opcional) - independente do bucket: o profile usado para
+# acessar o bucket da KB e tipicamente distinto do profile resolvido para
+# cada cliente/incidente investigado (contas AWS diferentes). Persistido
+# separadamente do bucket para permitir trocar um sem afetar o outro; e
+# sempre OPCIONAL - sem ele, kb_manager.py cai no comportamento padrao
+# (AWS_PROFILE/default do ambiente).
+$KB_PROFILE_CONFIG_FILE = Join-Path $KIRO_DIR "noc-guard\.kb_profile"
+$EXISTING_KB_PROFILE = ""
+if ($KB_BUCKET -and (Test-Path $KB_PROFILE_CONFIG_FILE)) {
+    $EXISTING_KB_PROFILE = (Get-Content $KB_PROFILE_CONFIG_FILE -Raw).Trim()
+}
+
+$KB_PROFILE = ""
+if ($KB_BUCKET) {
+    if ($EXISTING_KB_PROFILE) {
+        Say ($MSG_KB_PROFILE_EXISTING -f $EXISTING_KB_PROFILE)
+        if (-not $Yes) {
+            $KEEP_PROFILE_ANS = (Read-Host ($MSG_KB_PROFILE_KEEP_PROMPT -f $EXISTING_KB_PROFILE)).Trim()
+            if ([string]::IsNullOrWhiteSpace($KEEP_PROFILE_ANS) -or $KEEP_PROFILE_ANS -match '^[sSyY]') {
+                $KB_PROFILE = $EXISTING_KB_PROFILE
+                Say ($MSG_KB_PROFILE_SET -f $KB_PROFILE)
+            } elseif ($KEEP_PROFILE_ANS -match '^[tTcC]') {
+                $PROFILE_INPUT = (Read-Host "$MSG_KB_PROFILE_PROMPT").Trim()
+                if ($PROFILE_INPUT) {
+                    $KB_PROFILE = $PROFILE_INPUT
+                    Say ($MSG_KB_PROFILE_SET -f $KB_PROFILE)
+                } else {
+                    Say $MSG_KB_PROFILE_SKIPPED
+                    if (Test-Path $KB_PROFILE_CONFIG_FILE) { Remove-Item $KB_PROFILE_CONFIG_FILE -Force }
+                }
+            } else {
+                Say $MSG_KB_PROFILE_SKIPPED
+                if (Test-Path $KB_PROFILE_CONFIG_FILE) { Remove-Item $KB_PROFILE_CONFIG_FILE -Force }
+            }
+        } else {
+            $KB_PROFILE = $EXISTING_KB_PROFILE
+            Say ($MSG_KB_PROFILE_SET -f $KB_PROFILE)
+        }
+    } else {
+        Say $MSG_KB_PROFILE_DESC
+        if (-not $Yes) {
+            $PROFILE_INPUT = (Read-Host "$MSG_KB_PROFILE_PROMPT").Trim()
+            if ($PROFILE_INPUT) {
+                $KB_PROFILE = $PROFILE_INPUT
+                Say ($MSG_KB_PROFILE_SET -f $KB_PROFILE)
+            } else {
+                Say $MSG_KB_PROFILE_SKIPPED
+            }
+        } else {
+            Say $MSG_KB_PROFILE_SKIPPED
+        }
+    }
+}
+
+if ($KB_PROFILE) {
+    $nocGuardDir = Join-Path $KIRO_DIR "noc-guard"
+    if (-not (Test-Path $nocGuardDir)) { New-Item -ItemType Directory -Path $nocGuardDir -Force | Out-Null }
+    [System.IO.File]::WriteAllText($KB_PROFILE_CONFIG_FILE, $KB_PROFILE, [System.Text.UTF8Encoding]::new($false))
+}
+
 if ($KB_BUCKET) {
     $nocGuardDir = Join-Path $KIRO_DIR "noc-guard"
     if (-not (Test-Path $nocGuardDir)) { New-Item -ItemType Directory -Path $nocGuardDir -Force | Out-Null }
@@ -359,10 +432,14 @@ if ($KB_BUCKET) {
     # reinstalacoes futuras. [System.IO.File]::WriteAllText com UTF8Encoding($false)
     # grava sem BOM de forma identica em PS 5.1 e PS 7+.
     [System.IO.File]::WriteAllText($KB_CONFIG_FILE, $KB_BUCKET, [System.Text.UTF8Encoding]::new($false))
+    $KB_PROFILE_FLAG = ""
+    if ($KB_PROFILE) {
+        $KB_PROFILE_FLAG = " --kb-profile $KB_PROFILE"
+    }
     if ($LANG_CHOICE -ne "2") {
-        $env:KB_DIRECTIVE_TEXT = "- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Whenever you successfully diagnose a complex root cause, run ``kb_manager.py --action add`` to auto-document the resolution."
+        $env:KB_DIRECTIVE_TEXT = "## Final Checklist - Knowledge Base (NEXT)``n``nBefore ending EVERY response where you investigated an AWS/K8s/infra incident, check:``n``n1. Did this investigation involve 3+ read commands (AWS/logs/metrics/kubectl) AND did you reach an explicit conclusion (root cause identified, OR confirmed false positive, OR clear recommendation)?``n2. If YES to #1: your NEXT action, before finishing, MUST be running ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action add --alert `"<short alert/topic name>`" --content `"<concise summary: root cause, evidence, recommendation>`"``. Do this silently as part of your workflow, then mention in your final answer that the finding was recorded.``n3. If NO (quick lookup, single command, no conclusion reached): skip this step, no need to mention it.``n``nTo search the Knowledge Base for prior similar incidents, use: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query `"<term>`"``."
     } else {
-        $env:KB_DIRECTIVE_TEXT = "- Para consultar ou registrar aprendizados na Base de Conhecimento / Runbooks compartilhados da equipe, utilize o script: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Sempre que diagnosticar com sucesso a causa raiz de um incidente complexo, execute ``kb_manager.py --action add`` para auto-documentar a resolucao."
+        $env:KB_DIRECTIVE_TEXT = "## Checklist Final - Base de Conhecimento (PROXIMO PASSO)``n``nAntes de finalizar TODA resposta em que voce investigou um incidente de AWS/K8s/infra, verifique:``n``n1. Essa investigacao envolveu 3 ou mais comandos de leitura (AWS/logs/metricas/kubectl) E voce chegou a uma conclusao explicita (causa raiz identificada, OU falso positivo confirmado, OU recomendacao clara)?``n2. Se SIM ao item 1: sua PROXIMA acao, antes de terminar, DEVE ser executar ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action add --alert `"<nome curto do alerta/topico>`" --content `"<resumo conciso: causa raiz, evidencias, recomendacao>`"``. Faca isso silenciosamente como parte do seu fluxo, depois mencione na resposta final que o achado foi registrado.``n3. Se NAO (consulta rapida, comando unico, sem conclusao): pule esta etapa, sem necessidade de mencion-la.``n``nPara pesquisar na Base de Conhecimento por incidentes semelhantes anteriores, utilize: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query `"<termo>`"``."
     }
 } else {
     $env:KB_DIRECTIVE_TEXT = ""
@@ -370,7 +447,7 @@ if ($KB_BUCKET) {
 
 # Directories
 Step "$MSG_MKDIR $KIRO_DIR"
-foreach ($d in @("agents", "noc-guard", "noc-guard\steering", "noc-guard\skills\cloudtrail-search", "noc-guard\skills\knowledge-builder", "noc-guard\kb")) {
+foreach ($d in @("agents", "noc-guard", "noc-guard\steering", "noc-guard\skills\cloudtrail-search", "noc-guard\skills\knowledge-builder", "noc-guard\skills\stop-hook", "noc-guard\kb")) {
     $dPath = Join-Path $KIRO_DIR $d
     if (-not (Test-Path $dPath)) { New-Item -ItemType Directory -Path $dPath -Force | Out-Null }
     Say $dPath
@@ -412,6 +489,9 @@ Say "skill (cloudtrail) -> $SKILL_CT"
 $SKILL_KB = Join-Path $KIRO_DIR "noc-guard\skills\knowledge-builder\kb_manager.py"
 Copy-Item (Join-Path $REPO_DIR "skills\knowledge-builder\kb_manager.py") $SKILL_KB -Force
 Say "skill (knowledge)  -> $SKILL_KB"
+$SKILL_HOOK = Join-Path $KIRO_DIR "noc-guard\skills\stop-hook\kb_reminder.py"
+Copy-Item (Join-Path $REPO_DIR "skills\stop-hook\kb_reminder.py") $SKILL_HOOK -Force
+Say "hook (stop)  -> $SKILL_HOOK"
 
 $NEW_AGENT = "$AGENT_FILE.new-$STAMP"
 Copy-Item (Join-Path $REPO_DIR "agents\noc-guard.json.template") $NEW_AGENT -Force
