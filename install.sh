@@ -156,7 +156,7 @@ fi
 
 # ------------------------------------------------------------------ diretórios
 step "$MSG_MKDIR $KIRO_DIR"
-for d in agents steering noc-guard skills/cloudtrail-search; do
+for d in agents steering noc-guard skills/cloudtrail-search skills/knowledge-builder; do
   mkdir -p "$KIRO_DIR/$d"
   say "$KIRO_DIR/$d"
 done
