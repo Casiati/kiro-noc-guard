@@ -465,7 +465,17 @@ if [ -n "$KB_BUCKET" ]; then
     KB_PROFILE_FLAG=" --kb-profile $KB_PROFILE"
   fi
   if [ "$LANG_CHOICE" != "2" ]; then
-    export KB_DIRECTIVE_TEXT="## Final Checklist — Knowledge Base (NEXT)
+    export KB_DIRECTIVE_TEXT="## Initial Checklist — Knowledge Base (BEFORE INVESTIGATING)
+
+As soon as you receive a new alert/incident (not a one-off single-command query), BEFORE starting the AWS/K8s investigation:
+
+1. Does the alert identify a specific resource/service (e.g., ECS service name, cluster, task definition, instance, named alarm) — not a generic single-command question?
+2. If YES to #1: your FIRST action, before any other investigation command, MUST be searching the Knowledge Base for that resource/alert type: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query \"<service/resource name or alert type>\"\`.
+3. If the search returns a relevant, recent record: do NOT repeat the investigation from scratch. Summarize the prior finding to the operator, state the record's date, and only re-investigate the specific points that may have changed since then (e.g., a new spike, different behavior than what was already documented) — the goal is avoiding duplicate analyses, not skipping validation whenever there's genuine doubt.
+4. If there is no relevant record, or the search returns nothing: proceed normally with the full investigation (and, at the end, follow the Final Checklist below).
+5. If it's a one-off/trivial single-command query (not an incident investigation): skip this step.
+
+## Final Checklist — Knowledge Base (NEXT)
 
 Before ending EVERY response where you investigated an AWS/K8s/infra incident, check:
 
@@ -475,7 +485,17 @@ Before ending EVERY response where you investigated an AWS/K8s/infra incident, c
 
 To search the Knowledge Base for prior similar incidents, use: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query \"<term>\"\`."
   else
-    export KB_DIRECTIVE_TEXT="## Checklist Final — Base de Conhecimento (PRÓXIMO PASSO)
+    export KB_DIRECTIVE_TEXT="## Checklist Inicial — Base de Conhecimento (ANTES DE INVESTIGAR)
+
+Assim que receber um novo alerta/incidente (não uma consulta pontual de comando único), ANTES de iniciar a investigação AWS/K8s:
+
+1. O alerta identifica um recurso/serviço específico (ex: nome de serviço ECS, cluster, task definition, instância, alarme nomeado) — não é uma pergunta genérica de único comando?
+2. Se SIM ao item 1: sua PRIMEIRA ação, antes de qualquer outro comando de investigação, DEVE ser buscar na Base de Conhecimento por esse recurso/tipo de alerta: \`python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET$KB_PROFILE_FLAG --action search --query \"<nome do serviço/recurso ou tipo de alerta>\"\`.
+3. Se a busca retornar um registro relevante e recente: NÃO repita a investigação do zero. Resuma o achado anterior ao operador, informe a data do registro, e só investigue novamente os pontos específicos que possam ter mudado desde então (ex: novo pico, comportamento diferente do já documentado) — o objetivo é evitar duplicar análises já feitas, não pular a validação sempre que houver dúvida real.
+4. Se NÃO houver registro relevante, ou a busca não retornar nada: prossiga normalmente com a investigação completa (e, ao final, siga o Checklist Final abaixo).
+5. Se for uma consulta pontual/trivial de único comando (sem caracterizar investigação de incidente): pule esta etapa.
+
+## Checklist Final — Base de Conhecimento (PRÓXIMO PASSO)
 
 Antes de finalizar TODA resposta em que você investigou um incidente de AWS/K8s/infra, verifique:
 
