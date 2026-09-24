@@ -144,8 +144,7 @@ SEGMENTS.append(seg(r"aws\s+logs\s+(?:start-query|stop-query)"))
 # mutação de infraestrutura => liberado para permitir acesso de leitura ao cluster.
 SEGMENTS.append(seg(r"aws\s+eks\s+update-kubeconfig"))
 SEGMENTS.append(seg(r"aws\s+dynamodb\s+query"))
-SEGMENTS.append(seg(r"aws\s+s3\s+(?:ls|sync|cp)"))
-SEGMENTS.append(seg(r"python3\s+\S*knowledge-builder/kb_manager\.py"))
+SEGMENTS.append(seg(r"aws\s+s3\s+ls"))
 SEGMENTS.append(seg(r"aws\s+s3api\s+(?:list|get|head)-[\w-]+"))
 SEGMENTS.append(seg(r"aws\s+sts\s+(?:get-caller-identity|decode-authorization-message)"))
 SEGMENTS.append(seg(r"aws\s+configure\s+(?:list|list-profiles)"))
@@ -311,9 +310,9 @@ PROMPT = [
     "aws cloudwatch delete-alarms --alarm-names a --profile EXAMPLE",
     "aws iam update-user --user-name x --profile EXAMPLE",
     "aws iam attach-role-policy --role-name r --policy-arn a --profile EXAMPLE",
-    
+    "aws s3 cp local.txt s3://b/k --profile EXAMPLE",
     "aws s3 rm s3://b/k --profile EXAMPLE",
-    
+    "aws s3 sync . s3://b --profile EXAMPLE",
     "aws lambda update-function-code --function-name f --profile EXAMPLE",
     "aws ecs update-service --cluster c --service s --desired-count 0 --profile EXAMPLE",
     "curl -X POST https://api.example.com/deploy",
