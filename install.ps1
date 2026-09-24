@@ -40,6 +40,13 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_AUDIT = "Auditar a qualquer momento:"
     $MSG_USE = "Usar sem mudar o default:"
 
+    $MSG_KB_TITLE = "Base de Conhecimento Compartilhada (AWS S3)"
+    $MSG_KB_DESC = "O agente pode auto-documentar a resolucao de incidentes em arquivos Markdown sincronizados via AWS S3 para toda a equipe compartilhar o historico de solucoes."
+    $MSG_KB_ENABLE = "Deseja ativar a Base de Conhecimento compartilhada via AWS S3? [s/N] "
+    $MSG_KB_PROMPT = "Informe o nome completo do Bucket S3 (ex: noc-runbooks-123456789012-us-east-1): "
+    $MSG_KB_INVALID = "Nome de bucket invalido! Deve ter entre 3 e 63 caracteres (letras minusculas, numeros, hifens e pontos; sem '..')."
+    $MSG_KB_SKIPPED = "Base de Conhecimento nao ativada (pode ser configurada depois)."
+
     $env:LANG_RULE_TEXT = "CRITICAL LANGUAGE RULE: Although your system prompt is in English, you MUST ALWAYS output the visual alerts and all chat interactions exclusively in Brazilian Portuguese (pt-BR)."
     $env:ALERT_TPL_TEXT = "🚨 **[ALERTA DE ACAO DE RISCO / MUTACAO]** 🚨`n> [EMOJI] [Explicacao ultra leiga e direta do que o comando fara]. Cuidado [EMOJI]`n`n* **Comando:** ``[comando exato]```n* **Ambiente:** ``[Recurso / Cluster / Conta]```n* **Impacto:** ``[O que sera afetado/interrompido no momento]```n* **Reversivel?** ``[Sim / Nao]```n"
 } else {
@@ -72,6 +79,13 @@ if ($LANG_CHOICE -eq "2") {
     $MSG_AUDIT = "Audit anytime:"
     $MSG_USE = "Use without changing default:"
 
+    $MSG_KB_TITLE = "Shared Knowledge Base (AWS S3)"
+    $MSG_KB_DESC = "The agent can auto-document incident resolutions into Markdown files synced via AWS S3 so the entire team shares the same troubleshooting history."
+    $MSG_KB_ENABLE = "Enable shared Knowledge Base via AWS S3? [y/N] "
+    $MSG_KB_PROMPT = "Enter the full S3 Bucket name (e.g., noc-runbooks-123456789012-us-east-1): "
+    $MSG_KB_INVALID = "Invalid bucket name! Must be between 3 and 63 characters (lowercase letters, numbers, hyphens, and dots; no '..')."
+    $MSG_KB_SKIPPED = "Knowledge Base skipped (can be configured later)."
+
     $env:LANG_RULE_TEXT = "CRITICAL LANGUAGE RULE: You MUST ALWAYS interact with the user and render the visual alerts exclusively in English."
     $env:ALERT_TPL_TEXT = "🚨 **[RISK ACTION / MUTATION ALERT]** 🚨`n> [EMOJI] [Ultra-layman and direct explanation of what the command will do, e.g., `"This will destroy the production pod`"]. Warning [EMOJI]`n`n* **Command:** ``[exact command]```n* **Environment:** ``[Resource / Cluster / Account]```n* **Impact:** ``[What will be affected/interrupted right now]```n* **Reversible?** ``[Yes / No]```n"
 }
@@ -81,7 +95,8 @@ $KIRO_DIR = if ($env:KIRO_DIR) { $env:KIRO_DIR } else { Join-Path $HOME ".kiro" 
 $AGENT_NAME = "noc-guard"
 $AGENT_FILE = Join-Path $KIRO_DIR "agents\$AGENT_NAME.json"
 $GEN_FILE = Join-Path $KIRO_DIR "noc-guard\generate_allowlist.py"
-$STEERING_FILE = Join-Path $KIRO_DIR "steering\noc-readonly-first.md"
+$STEERING_FILE = Join-Path $KIRO_DIR "noc-guard\steering\noc-readonly-first.md"
+$LEGACY_STEERING = Join-Path $KIRO_DIR "steering\noc-readonly-first.md"
 $STAMP = Get-Date -Format "yyyyMMdd-HHmmss"
 
 function Say { param([string]$text) Write-Host "  $text" }
@@ -128,6 +143,13 @@ foreach ($opt in @("aws", "kubectl", "docker", "jq")) {
     }
 }
 
+$hasBoto = python -c "import boto3; print('ok')" 2>$null
+if ($hasBoto -eq "ok") {
+    Say "boto3        $MSG_OPT_OK"
+} else {
+    Say "boto3        nao instalado (search_trail usara fallback nativo da AWS CLI)"
+}
+
 # Repository Validation
 Step $MSG_VAL_REPO
 $FILES = @(
@@ -141,12 +163,58 @@ foreach ($f in $FILES) {
     Say "ok  $f"
 }
 
+# Knowledge Base (Optional)
+Step $MSG_KB_TITLE
+Say $MSG_KB_DESC
+$KB_BUCKET = ""
+$ENABLE_KB_ANS = Read-Host "$MSG_KB_ENABLE"
+if ($ENABLE_KB_ANS -match '^[sSyY]') {
+    while ($true) {
+        $BUCKET_INPUT = (Read-Host "$MSG_KB_PROMPT").Trim()
+        if ([string]::IsNullOrWhiteSpace($BUCKET_INPUT)) {
+            Say $MSG_KB_SKIPPED
+            break
+        }
+        if ($BUCKET_INPUT -match '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' -and -not ($BUCKET_INPUT.Contains(".."))) {
+            $KB_BUCKET = $BUCKET_INPUT
+            Say "ok: bucket configurado -> $KB_BUCKET"
+            break
+        } else {
+            Write-Host "  AVISO: $MSG_KB_INVALID" -ForegroundColor Yellow
+        }
+    }
+} else {
+    Say $MSG_KB_SKIPPED
+}
+
+if ($KB_BUCKET) {
+    if ($langChoice -eq "1") {
+        $env:KB_DIRECTIVE_TEXT = "- To query or record learnings in the shared NOC Knowledge Base / Runbooks, use: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Whenever you successfully diagnose a complex root cause, run ``kb_manager.py --action add`` to auto-document the resolution."
+    } else {
+        $env:KB_DIRECTIVE_TEXT = "- Para consultar ou registrar aprendizados na Base de Conhecimento / Runbooks compartilhados da equipe, utilize o script: ``python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket $KB_BUCKET``. Sempre que diagnosticar com sucesso a causa raiz de um incidente complexo, execute ``kb_manager.py --action add`` para auto-documentar a resolucao."
+    }
+} else {
+    $env:KB_DIRECTIVE_TEXT = ""
+}
+
 # Directories
 Step "$MSG_MKDIR $KIRO_DIR"
-foreach ($d in @("agents", "steering", "noc-guard", "skills\cloudtrail-search")) {
+foreach ($d in @("agents", "noc-guard", "noc-guard\steering", "noc-guard\skills\cloudtrail-search", "noc-guard\skills\knowledge-builder", "noc-guard\kb")) {
     $dPath = Join-Path $KIRO_DIR $d
     if (-not (Test-Path $dPath)) { New-Item -ItemType Directory -Path $dPath -Force | Out-Null }
     Say $dPath
+}
+
+# Limpeza de steering legado na pasta global que afetava outros agentes (ex: kiro_default)
+if (Test-Path $LEGACY_STEERING) {
+    Remove-Item $LEGACY_STEERING -Force
+    Say "limpeza: removido steering legado global em $LEGACY_STEERING"
+}
+
+# Limpeza de skills legadas na pasta global
+$LEGACY_CT = Join-Path $KIRO_DIR "skills\cloudtrail-search\search_trail.py"
+if (Test-Path $LEGACY_CT) {
+    Remove-Item $LEGACY_CT -Force
 }
 
 # Backups
@@ -167,9 +235,12 @@ Copy-Item (Join-Path $REPO_DIR "steering\noc-readonly-first.md") $STEERING_FILE 
 Say "steering -> $STEERING_FILE"
 Copy-Item (Join-Path $REPO_DIR "scripts\generate_allowlist.py") $GEN_FILE -Force
 Say "gerador  -> $GEN_FILE"
-$SKILL_FILE = Join-Path $KIRO_DIR "skills\cloudtrail-search\search_trail.py"
-Copy-Item (Join-Path $REPO_DIR "skills\cloudtrail-search\search_trail.py") $SKILL_FILE -Force
-Say "skill    -> $SKILL_FILE"
+$SKILL_CT = Join-Path $KIRO_DIR "noc-guard\skills\cloudtrail-search\search_trail.py"
+Copy-Item (Join-Path $REPO_DIR "skills\cloudtrail-search\search_trail.py") $SKILL_CT -Force
+Say "skill (cloudtrail) -> $SKILL_CT"
+$SKILL_KB = Join-Path $KIRO_DIR "noc-guard\skills\knowledge-builder\kb_manager.py"
+Copy-Item (Join-Path $REPO_DIR "skills\knowledge-builder\kb_manager.py") $SKILL_KB -Force
+Say "skill (knowledge)  -> $SKILL_KB"
 
 $NEW_AGENT = "$AGENT_FILE.new-$STAMP"
 Copy-Item (Join-Path $REPO_DIR "agents\noc-guard.json.template") $NEW_AGENT -Force
@@ -189,12 +260,14 @@ if '__LANGUAGE_RULE__' in content:
     content = content.replace('__LANGUAGE_RULE__', os.environ.get('LANG_RULE_TEXT', ''))
 if '__ALERT_TEMPLATE__' in content:
     content = content.replace('__ALERT_TEMPLATE__', os.environ.get('ALERT_TPL_TEXT', ''))
+if '__KB_DIRECTIVE__' in content:
+    content = content.replace('__KB_DIRECTIVE__', os.environ.get('KB_DIRECTIVE_TEXT', ''))
 p.write_text(content, encoding='utf-8')
 "@
 
 foreach ($f in @($STEERING_FILE, $GEN_FILE, $NEW_AGENT)) {
     $content = Get-Content $f -Raw -Encoding UTF8
-    if ($content -match "__HOME__|__LANGUAGE_RULE__") {
+    if ($content -match "__HOME__|__LANGUAGE_RULE__|__KB_DIRECTIVE__") {
         $py_script | python - $f $HOME_FWD
         Say "-> configured variables in $(Split-Path $f -Leaf)"
     }

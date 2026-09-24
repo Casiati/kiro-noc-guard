@@ -129,6 +129,9 @@ SEGMENTS.append(seg(r"git\s+config\s+--get"))
 # --------------------------------------------------- skill de cloudtrail
 SEGMENTS.append(seg(r"python3\s+\S*cloudtrail-search/search_trail\.py"))
 
+# --------------------------------------------------- skill de knowledge base
+SEGMENTS.append(seg(r"python3\s+\S*knowledge-builder/kb_manager\.py"))
+
 # ------------------------------------------------------------- AWS CLI (leitura)
 # Verbos de leitura. Mutações (create/delete/put/update/modify/terminate/
 # start/stop/reboot/...) ficam de fora => caem em PROMPT.
@@ -234,6 +237,7 @@ AUTO = [
     "dig +short api.example.com",
     "ss -tnp",
     "python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile PROD --since 1h",
+    "python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket my-bucket --action search --query timeout",
     "aws logs filter-log-events --log-group-name /aws/lambda/f --start-time 1700000000 --profile EXAMPLE-NOC --output json",
     "aws logs tail /aws/lambda/f --since 1h --profile EXAMPLE-NOC",
     "aws logs describe-log-groups --profile EXAMPLE-NOC --output table",

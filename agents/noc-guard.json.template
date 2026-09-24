@@ -42,6 +42,6 @@
     }
   },
   "resources": [
-    "file://__HOME__/.kiro/steering/**/*.md"
+    "file://__HOME__/.kiro/noc-guard/steering/**/*.md"
   ]
 }

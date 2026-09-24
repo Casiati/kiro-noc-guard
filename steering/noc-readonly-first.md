@@ -1,5 +1,5 @@
 ---
-inclusion: always
+inclusion: manual
 ---
 
 # NOC Environment — Incident Triage (READ-ONLY)
@@ -12,12 +12,13 @@ This machine is a **NOC incident triage** station. The usage of kiro-cli here is
 
 ## Operational Directives
 
-- Read-only commands are auto-approved by the agent configuration (`~/.kiro/agents/noc-aws.json`): **do not ask for confirmation**, execute them directly.
+- Read-only commands are auto-approved by the agent configuration (`~/.kiro/agents/noc-guard.json`): **do not ask for confirmation**, execute them directly.
 - Any mutation — `create-*`, `delete-*`, `update-*`, `put-*`, `modify-*`, `terminate-*`, `start-*`, `stop-*`, `reboot-*`, `attach/detach`, `rm`, `systemctl restart`, `docker restart`, `kubectl delete`, disk writing — requires **explicit operator confirmation**, without exceptions, even if the AWS profile has write permissions.
 - AWS investigation preference, in this order: CloudWatch Logs (`filter-log-events`, `tail`, `get-log-events`) → metrics (`get-metric-data`, `get-metric-statistics`) → resource state (`describe-*`) → events (`cloudtrail lookup-events`).
 - Use targeted queries: always include a time window (`--start-time`/`--since`), `--filter-pattern`, and `--max-items`/`--limit` to avoid pulling unnecessary volume.
 - Always include the appropriate `--profile` parameter for the environment you are analyzing when running AWS commands.
 - To search CloudTrail logs, NEVER use the native CLI. ALWAYS execute the script `python3 ~/.kiro/skills/cloudtrail-search/search_trail.py`.
+__KB_DIRECTIVE__
 - If a legitimate read command is blocked because it is not on the allowlist, output which command was blocked and suggest regenerating the allowlist using `python3 ~/.kiro/noc-guard/generate_allowlist.py`.
 
 ## Rules for Mutation Commands / Confirmation
