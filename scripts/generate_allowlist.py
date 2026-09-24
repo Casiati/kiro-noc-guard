@@ -82,7 +82,8 @@ SEGMENTS.append(seg(r"ping\s+-c\s+\d+"))
 # curl: apenas flags de leitura em allowlist explícito (sem lookahead no regex Rust).
 # -X/--request, -d/--data, -F/--form, -T/--upload-file, -o/-O ficam de fora => PROMPT.
 _Q = r"(?:\"[^\"]*\"|'[^']*'|\S+)"
-CURL_FLAG = (r"(?:-[sSLkvig#]+|-o-|--silent|--show-error|--location|--insecure|"
+CURL_FLAG = (r"(?:-[sSLkvig#46]+|-o-|(?:-o|--output)\s+(?:\"?(?:/dev/null|NUL|nul)\"?|'(?:/dev/null|NUL|nul)')|"
+             r"--silent|--show-error|--location|--insecure|--ssl-no-revoke|"
              r"--compressed|--fail|--fail-with-body|--head|-I|--no-progress-meter|"
              r"--http1\.1|--http2|--tlsv1\.2|--retry\s+\d+|-m\s+\d+|"
              r"--max-time\s+\d+|--connect-timeout\s+\d+|"
@@ -232,6 +233,8 @@ AUTO = [
     "aws logs stop-query --query-id abc123 --profile EXAMPLE-NOC",
     "git status --short && git log --oneline -5",
     "curl -s -o- https://example.com/health",
+    "curl -v -o /dev/null -sS --connect-timeout 10 --max-time 20 https://roadcard.com.br/ 2>&1",
+    "echo \"=== HTTPS check with timing ===\"; curl -v -o /dev/null -sS --connect-timeout 10 --max-time 20 https://roadcard.com.br/ 2>&1; echo \"EXIT_CODE=$?\"",
     "curl -sS -m 5 -H 'Accept: application/json' https://api.example.com/status",
     "ping -c 3 8.8.8.8",
     "dig +short api.example.com",
