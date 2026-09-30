@@ -15,6 +15,7 @@ Em triagem de incidentes, confirmar cada comando de leitura custa tempo, mas lib
 - **Auto-instalador Inteligente**: Detecta dependências ausentes e oferece instalação via `winget`, `apt-get`, `dnf` ou `pip`. Suporta Windows (PowerShell) e Linux/macOS.
 - **S3 Knowledge Base**: Faça buscas automáticas em runbooks Markdown armazenados no S3. O agente aprende com seus procedimentos internos de forma nativa e sem expor dados.
 - **CloudTrail Skill**: Um script Python (`search_trail.py`) ultrarrápido para buscas no AWS CloudTrail, com fallback automático integrado caso o pacote `boto3` não exista.
+- **Logs Search Skill**: `logs_search.py` consulta o CloudWatch Logs em modo somente leitura e devolve saída agregada e compacta (economiza tokens): `k8s-audit` (deploys/rollouts/scale e, com `--status`, Ready/restarts dos pods via audit log do EKS), `k8s-events` (eventos do Kubernetes sem precisar de kubeconfig) `logs` (logs de aplicação com agregação local) e `sources` (descobre onde estão os logs). Custo zero: usa só APIs gratuitas (FilterLogEvents/Describe*), nunca Logs Insights.
 
 ### 🛡️ Arquitetura de Segurança (As 3 Camadas)
 
@@ -70,6 +71,7 @@ In incident triage, confirming every read tool costs time, but granting full tru
 - **Smart Auto-installer**: Detects missing dependencies and offers automatic installation via `winget`, `apt-get`, `dnf` or `pip`. Works seamlessly on Windows (PowerShell) and Linux/macOS.
 - **S3 Knowledge Base**: Sync and automatically search Markdown runbooks stored securely in an S3 bucket. The agent learns from your private procedures without exposing data.
 - **CloudTrail Skill**: A fast, resilient Python script (`search_trail.py`) for optimized AWS CloudTrail searches, featuring automatic fallback if `boto3` is not installed.
+- **Logs Search Skill**: `logs_search.py` queries CloudWatch Logs read-only and returns compact, aggregated output (saves tokens): `k8s-audit` (deploys/rollouts/scaling and, with `--status`, pod Ready/restarts from the EKS audit log), `k8s-events` (Kubernetes events without a kubeconfig) `logs` (application logs with local aggregation) and `sources` (discovers where the logs are). Zero cost: free APIs only (FilterLogEvents/Describe*), never Logs Insights.
 
 ### 🛡️ Security Architecture (The 3 Tiers)
 
