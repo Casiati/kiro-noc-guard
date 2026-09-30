@@ -38,8 +38,28 @@ def agent_path(argv=None) -> Path:
     return DEFAULT_AGENT
 
 # Argumentos sem metacaracteres de shell (bloqueia ; && || | > < backtick e newline).
-# `$` é permitido (necessário para awk '{print $7}'); `$(` cai no DENY.
-A = r"[^;&|><`\n]*"
+# `$(` cai no DENY.
+#
+# Tokenização ciente de aspas, espelhando o bash: fora de aspas, `'` e `"`
+# SEMPRE abrem um bloco que precisa fechar no mesmo comando; `\x` consome o
+# par (bash trata `\;` como literal); `$` só vale seguido de nome/parâmetro
+# especial (nunca `$'...'`/`$"..."`, que o bash interpreta como aspas). Isso
+# impede ataques de paridade de aspas, em que o regex "acha" que está dentro
+# de aspas enquanto o bash está fora (ex.: echo \' ; rm -f x ; echo \').
+_PLAIN = r"(?:[^;&|><`'\"\\\n$]|\$[\w{}?#@*!.]|\\[^\n])"
+# A (padrão): blocos entre aspas também não podem conter metacaracteres.
+_SQ_STRICT = r"'[^';&|><`\n]*'"
+_DQ_STRICT = r'"(?:[^";&|><`\\\n]|\\[^;&|><`\n])*"'
+A = rf"(?:{_PLAIN}|{_SQ_STRICT}|{_DQ_STRICT})*"
+# AQ (relaxado): dentro de aspas, metacaracteres são DADOS (o bash não os
+# interpreta). Usado SÓ em ferramentas que não executam nem gravam nada a
+# partir desses argumentos (aws cli, kubectl leitura, jq/yq, grep, skills):
+# ex. --filter-pattern '{ $.a = "x" && $.b = "y" }', jq '.x | fromjson'.
+# NÃO usar em awk/sort/find/rg etc., onde `>`/`|` dentro do script grava
+# arquivo ou executa comando.
+_SQ_ANY = r"'[^'\n]*'"
+_DQ_ANY = r'"(?:[^"\\\n`]|\\[^\n])*"'
+AQ = rf"(?:{_PLAIN}|{_SQ_ANY}|{_DQ_ANY})*"
 # Sufixo opcional de redirecionamento de stderr/stdout (comum em triagem).
 # Aceita SOMENTE descartes para o "buraco negro" (/dev/null no Unix, NUL no
 # Windows) ou 2>&1 (merge stderr->stdout). NUNCA um caminho de arquivo real:
@@ -53,6 +73,11 @@ R = rf"(?:\s+{_DISCARD}){{0,4}}"
 def seg(prefix: str) -> str:
     """Segmento = comando + argumentos seguros + redirecionamentos de descarte opcionais."""
     return prefix + r"(?:\s+" + A + r")?" + R
+
+
+def segq(prefix: str) -> str:
+    """Como seg(), mas aceita metacaracteres DENTRO de aspas (ver AQ)."""
+    return prefix + r"(?:\s+" + AQ + r")?" + R
 
 
 def lit(cmd: str) -> str:
@@ -85,6 +110,11 @@ NET = ("dig", "nslookup", "host", "getent", "traceroute", "traceroute6", "tracep
        "openssl x509", "wget --spider", "mtr",
        "Test-NetConnection", "tnc", "tracert", "Resolve-DnsName", "ipconfig",
        "Get-NetIPAddress", "Get-NetAdapter", "arp", "route print")
+# Ferramentas de texto que aceitam metacaracteres entre aspas (segq/AQ): não
+# executam comandos nem gravam arquivos a partir de seus argumentos.
+# Fora de propósito: awk (print > f, |"cmd"), sort (-o), rg (--pre executa), yq (-i),
+# zgrep/zegrep (wrappers em shell script).
+QUOTED_OK = ("jq", "grep", "egrep", "fgrep")
 # ip / ifconfig: apenas subcomandos de leitura, com verbo de leitura EXPLÍCITO
 # e fechado (nunca aceita "add/del/set/change/flush/replace" etc, que mutam
 # rotas/interfaces). Cada objeto só casa com "show" (ou a forma abreviada
@@ -131,7 +161,7 @@ SSL_CLIENT_FLAG = (r"(?:-connect\s+[\w.\-:]+|-servername\s+[\w.\-]+|-showcerts|-
 SEGMENTS.append(rf"openssl\s+s_client(?:\s+{SSL_CLIENT_FLAG})*{R}")
 
 for c in TEXT + FS + SYS + PROC + NET:
-    SEGMENTS.append(seg(lit(c)))
+    SEGMENTS.append(segq(lit(c)) if c in QUOTED_OK else seg(lit(c)))
 
 # ping só na forma limitada (-c N), para não travar a sessão
 SEGMENTS.append(seg(r"ping\s+-c\s+\d+"))
@@ -169,8 +199,9 @@ KUBECTL_GFLAG = (
     r")"
 )
 KUBECTL_READ = (r"(?:get|describe|logs|top|version|explain|api-resources|"
-                r"api-versions|cluster-info|config\s+view|config\s+get-contexts|config\s+current-context)")
-SEGMENTS.append(seg(rf"kubectl(?:\s+{KUBECTL_GFLAG})*\s+{KUBECTL_READ}"))
+                r"api-versions|cluster-info|config\s+view|config\s+get-contexts|config\s+current-context|"
+                r"auth\s+can-i|auth\s+whoami|rollout\s+history|rollout\s+status)")
+SEGMENTS.append(segq(rf"kubectl(?:\s+{KUBECTL_GFLAG})*\s+{KUBECTL_READ}"))
 SEGMENTS.append(seg(r"crontab\s+-l"))
 SEGMENTS.append(seg(r"nginx\s+-[tTV]"))
 SEGMENTS.append(seg(r"apachectl\s+configtest"))
@@ -184,11 +215,21 @@ SEGMENTS.append(seg(r"git\s+tag\s+-l"))
 SEGMENTS.append(seg(r"git\s+remote\s+-v"))
 SEGMENTS.append(seg(r"git\s+config\s+--get"))
 
-# --------------------------------------------------- skill de cloudtrail
-SEGMENTS.append(seg(r"python3\s+\S*cloudtrail-search/search_trail\.py"))
-
-# --------------------------------------------------- skill de knowledge base
-SEGMENTS.append(seg(r"python3\s+\S*knowledge-builder/kb_manager\.py"))
+# ------------------------------------------------------------ skills (python)
+# Somente os scripts INSTALADOS em ~/.kiro/noc-guard/skills/<skill>/<arquivo>.py.
+# Caminho FECHADO (sem \S* antes do nome): antes, qualquer arquivo terminado em
+# ".../cloudtrail-search/search_trail.py" (ex.: /tmp/x/cloudtrail-search/...)
+# rodava sem confirmação — quem gravasse esse arquivo ganhava execução automática.
+# Aceita `~` (expandido pelo shell) ou o HOME absoluto do usuário, com `/` ou `\`.
+_HOME_ABS = re.escape(Path.home().as_posix()).replace("/", r"[/\\]")
+_SKILLS_DIR = rf"(?:~|{_HOME_ABS})[/\\]\.kiro[/\\]noc-guard[/\\]skills[/\\]"
+SKILL_SCRIPTS = (
+    ("cloudtrail-search", "search_trail.py"),
+    ("knowledge-builder", "kb_manager.py"),
+    ("logs-search", "logs_search.py"),
+)
+for _dir, _file in SKILL_SCRIPTS:
+    SEGMENTS.append(segq(rf"python3\s+{_SKILLS_DIR}{re.escape(_dir)}[/\\]{re.escape(_file)}"))
 
 # ------------------------------------------------------------- AWS CLI (leitura)
 # Verbos de leitura. Mutações (create/delete/put/update/modify/terminate/
@@ -196,21 +237,42 @@ SEGMENTS.append(seg(r"python3\s+\S*knowledge-builder/kb_manager\.py"))
 READ_VERBS = (r"describe|get|list|search|lookup|filter|batch-get|head|test|validate|"
               r"check|preview|estimate|simulate|generate-credential-report|"
               r"select|query|scan|sample|view|export-to|count")
-SEGMENTS.append(seg(rf"aws\s+[\w-]+\s+(?:{READ_VERBS})-[\w-]+"))
-SEGMENTS.append(seg(r"aws\s+logs\s+tail"))
-# start-query/stop-query: iniciam/encerram uma consulta do CloudWatch Logs Insights.
-# Não mutam infraestrutura nem dados => liberados para triagem.
-SEGMENTS.append(seg(r"aws\s+logs\s+(?:start-query|stop-query)"))
+# CUSTO ZERO — CloudWatch: GetMetricData, GetMetricWidgetImage e GetInsightRuleReport
+# são SEMPRE cobrados (fora do free tier de API requests). O motor Rust não tem
+# lookahead, então o segmento genérico casa qualquer serviço EXCETO "cloudwatch"
+# (complemento exato da palavra) e o cloudwatch ganha uma whitelist fechada de
+# verbos gratuitos. Tudo o mais do cloudwatch cai em PROMPT.
+def _not_word(word: str) -> str:
+    """Regex de um token [A-Za-z0-9_-]+ diferente de `word` (sem lookahead)."""
+    chars = "A-Za-z0-9_-"
+    alts = [re.escape(word[:i]) for i in range(1, len(word))]          # prefixos próprios
+    for i, ch in enumerate(word):                                          # difere na posição i
+        other = "[" + "".join(c for c in (
+            [chr(x) for x in range(ord('a'), ord('z') + 1)] + [chr(x) for x in range(ord('A'), ord('Z') + 1)]
+            + [str(d) for d in range(10)] + ["_", "-"]) if c != ch).replace("-", "") + "-]"
+        alts.append(re.escape(word[:i]) + other + f"[{chars}]*")
+    alts.append(re.escape(word) + f"[{chars}]+")                            # mais longo
+    return "(?:" + "|".join(alts) + ")"
+
+
+CW_BILLED = ("get-metric-data", "get-metric-widget-image", "get-insight-rule-report")
+CW_FREE = r"(?:describe-[\w-]+|list-[\w-]+|get-metric-statistics|get-dashboard|get-metric-stream)"
+SEGMENTS.append(segq(rf"aws\s+{_not_word('cloudwatch')}\s+(?:{READ_VERBS})-[\w-]+"))
+SEGMENTS.append(segq(rf"aws\s+cloudwatch\s+{CW_FREE}"))
+SEGMENTS.append(segq(r"aws\s+logs\s+tail"))
+# CUSTO ZERO: `aws logs start-query` (Logs Insights) é cobrado por GB varrido e
+# NÃO é auto-aprovado (cai em PROMPT). stop-query só encerra/economiza.
+SEGMENTS.append(segq(r"aws\s+logs\s+stop-query"))
 # update-kubeconfig: grava apenas no kubeconfig local (~/.kube/config), sem
 # mutação de infraestrutura => liberado para permitir acesso de leitura ao cluster.
-SEGMENTS.append(seg(r"aws\s+eks\s+update-kubeconfig"))
-SEGMENTS.append(seg(r"aws\s+dynamodb\s+query"))
-SEGMENTS.append(seg(r"aws\s+s3\s+ls"))
-SEGMENTS.append(seg(r"aws\s+s3api\s+(?:list|get|head)-[\w-]+"))
-SEGMENTS.append(seg(r"aws\s+sts\s+(?:get-caller-identity|decode-authorization-message)"))
-SEGMENTS.append(seg(r"aws\s+configure\s+(?:list|list-profiles)"))
-SEGMENTS.append(seg(r"aws\s+ecs\s+(?:describe|list)-[\w-]+"))
-SEGMENTS.append(seg(r"aws\s+(?:--version|help)"))
+SEGMENTS.append(segq(r"aws\s+eks\s+update-kubeconfig"))
+SEGMENTS.append(segq(r"aws\s+dynamodb\s+query"))
+SEGMENTS.append(segq(r"aws\s+s3\s+ls"))
+SEGMENTS.append(segq(r"aws\s+s3api\s+(?:list|get|head)-[\w-]+"))
+SEGMENTS.append(segq(r"aws\s+sts\s+(?:get-caller-identity|decode-authorization-message)"))
+SEGMENTS.append(segq(r"aws\s+configure\s+(?:list|list-profiles)"))
+SEGMENTS.append(segq(r"aws\s+ecs\s+(?:describe|list)-[\w-]+"))
+SEGMENTS.append(segq(r"aws\s+(?:--version|help)"))
 
 # ------------------------------------------------ encadeamento entre leituras
 ALT = "(?:" + "|".join(f"(?:{s})" for s in SEGMENTS) + ")"
@@ -249,6 +311,8 @@ DENY_CORE = [
     r"xxd\s+[^;&|><\n]*-r\b",
     r"git\s+[^;&|><\n]*--(?:ext-cmd|ext-diff|exec-path|upload-pack)\b",
     r"(?:sort|jq)\s+[^\n]*(?:\s-o\s|--output[\s=])",
+    r"rg\s+[^\n]*--pre(?:-glob)?\b",               # rg --pre executa programa
+    r"yq\s+(?:[^\n]*\s)?(?:-i\b|--inplace)",            # yq -i grava no arquivo
 ]
 
 # Regras que valem em qualquer posição do comando (não dependem de prefixo)
@@ -288,8 +352,13 @@ AUTO = [
     "kubectl --kubeconfig ~/.kube/config --context exemplo-prod get events -n minha-app",
     "kubectl --context exemplo-prod top pod -n minha-app",
     "kubectl -n kube-system get pods | grep fluent",
+    "kubectl --kubeconfig ~/.kube/noc-guard --context cl038 auth can-i get pods -n production",
+    "kubectl --context cl038 auth can-i --list -n production",
+    "kubectl --context cl038 auth whoami",
+    "kubectl -n production rollout history deploy/api-foo",
+    "kubectl -n production rollout status deploy/api-foo --timeout 10s",
+    "aws eks update-kubeconfig --name eks-x --region us-east-1 --profile EXAMPLE-NOC --alias cl038 --kubeconfig ~/.kube/noc-guard",
     "aws eks update-kubeconfig --name meu-cluster-eks --region us-east-1 --profile EXAMPLE-PROD-NOC --alias exemplo-prod",
-    "aws logs start-query --log-group-name /x --query-string 'fields @message' --start-time 1700000000 --end-time 1700003600 --profile EXAMPLE-NOC",
     "aws logs stop-query --query-id abc123 --profile EXAMPLE-NOC",
     "git status --short && git log --oneline -5",
     "curl -s -o- https://example.com/health",
@@ -299,15 +368,23 @@ AUTO = [
     "ping -c 3 8.8.8.8",
     "dig +short api.example.com",
     "ss -tnp",
-    "python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile PROD --since 1h",
+    "python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile PROD --since 1h",
+    f"python3 {Path.home().as_posix()}/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile PROD --since 1h",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py k8s-audit --profile EXAMPLE-NOC --cluster eks-x -n production --name api-foo --since 6h",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py k8s-events --profile EXAMPLE-NOC --cluster eks-x -n production --name api-foo --type Warning --since 24h 2>&1 | head -60",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py logs --profile EXAMPLE-NOC --log-group /aws/ecs/app --since 3h --filter-pattern '?timeout ?refused \"HTTP 503\"' --group-by bin",
     "python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket my-bucket --action search --query timeout",
     "aws logs filter-log-events --log-group-name /aws/lambda/f --start-time 1700000000 --profile EXAMPLE-NOC --output json",
     "aws logs tail /aws/lambda/f --since 1h --profile EXAMPLE-NOC",
     "aws logs describe-log-groups --profile EXAMPLE-NOC --output table",
     "aws logs get-query-results --query-id abc --profile EXAMPLE-NOC",
-    "aws cloudwatch get-metric-data --cli-input-json file://q.json --profile EXAMPLE-NOC",
     "aws cloudwatch get-metric-statistics --namespace AWS/RDS --start-time 2026-09-01T00:00:00Z --profile EXAMPLE-NOC",
     "aws cloudwatch describe-alarms --state-value ALARM --profile EXAMPLE-NOC --output json",
+    "aws cloudwatch list-metrics --namespace AWS/RDS --profile EXAMPLE-NOC",
+    "aws cloudwatch get-metric-statistics --namespace AWS/EC2 --metric-name CPUUtilization --period 3600 --statistics Average --start-time 2026-09-15T00:00:00Z --end-time 2026-09-29T00:00:00Z --profile EXAMPLE-NOC | jq '.Datapoints | sort_by(.Timestamp)'",
+    "aws cloudwatchlogs describe-x --profile P",
+    "aws cloudwatc describe-x --profile P",
+    "aws logs get-log-events --log-group-name g --log-stream-name s --limit 50 --profile EXAMPLE-NOC",
     "aws ec2 describe-instances --filters Name=instance-state-name,Values=running --profile EXAMPLE-NOC",
     "aws rds describe-db-instances --profile EXAMPLE-NOC",
     "aws iam list-users --profile EXAMPLE-NOC",
@@ -366,6 +443,18 @@ AUTO = [
     "ip a && ip r",
     "ifconfig | grep eth0",
     "openssl s_client -connect x:443 2>/dev/null | openssl x509 -noout -dates",
+    # --- metacaracteres DENTRO de aspas (filter-pattern, jq, JMESPath) ---
+    "aws logs filter-log-events --log-group-name /aws/eks/c/cluster --log-stream-name-prefix kube-apiserver-audit --start-time 1790711525000 --filter-pattern '{ $.objectRef.namespace = \"production\" && ($.verb = \"patch\" || $.verb = \"update\") && $.objectRef.subresource NOT EXISTS }' --max-items 30 --region us-east-1 --profile EXAMPLE-NOC --output json | jq -r '.events[].message | fromjson | [.requestReceivedTimestamp[0:19], .verb, (.responseStatus.code|tostring)] | @tsv'",
+    "aws logs filter-log-events --log-group-name g --output json | jq -r '.events[] | select(.x > 1) | .message'",
+    "aws logs filter-log-events --log-group-name g --filter-pattern '?ERROR ?\" 5\"' --max-items 5 --profile EXAMPLE-NOC",
+    "aws ec2 describe-instances --query 'Reservations[].Instances[] | length(@)' --profile EXAMPLE-NOC",
+    "kubectl -n production get pods -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{end}' | grep -E 'api|worker'",
+    "grep -E 'ERROR|FATAL' app.log | wc -l",
+    "python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket b --kb-profile Dev-NOC --action add --alert \"X\" --content \"CPU > 80% & readiness | 503\"",
+    "echo \"it's ok\"; date -u",
+    "echo \"EXIT=$?\"",
+    # bash: a string inteira fica entre aspas (\\" escapado) => rm NÃO executa
+    "aws logs describe-log-groups --x \"a\\\" ; rm -f /tmp/x ; echo \\\"\"",
 ]
 PROMPT = [
     "rm /tmp/file.txt",
@@ -398,6 +487,11 @@ PROMPT = [
     "kubectl -n x edit configmap cm",
     "kubectl -n x cp pod:/a /tmp/a",
     "kubectl -n x port-forward pod 8080:80",
+    "kubectl -n x rollout undo deploy/api",
+    "kubectl -n x rollout pause deploy/api",
+    "kubectl -n x rollout restart deploy/api",
+    "kubectl auth reconcile -f rbac.yaml",
+    "kubectl auth can-i get pods && kubectl delete pod x",
     "kubectl --namespace x delete job get-metrics",
     "git checkout main",
     "git commit -m x",
@@ -425,6 +519,18 @@ PROMPT = [
     "aws s3 sync . s3://b --profile EXAMPLE",
     "aws lambda update-function-code --function-name f --profile EXAMPLE",
     "aws ecs update-service --cluster c --service s --desired-count 0 --profile EXAMPLE",
+    # custo zero: Logs Insights / Live Tail são cobrados por uso => nunca AUTO
+    "aws cloudwatch get-metric-data --cli-input-json file://q.json --profile EXAMPLE-NOC",
+    "aws cloudwatch get-metric-data --metric-data-queries '[]' --start-time 1 --end-time 2 --profile EXAMPLE-NOC",
+    "aws  cloudwatch   get-metric-data --profile EXAMPLE-NOC",
+    "aws cloudwatch get-metric-widget-image --metric-widget '{}' --profile EXAMPLE-NOC",
+    "aws cloudwatch get-insight-rule-report --rule-name r --profile EXAMPLE-NOC",
+    "aws cloudwatch describe-alarms --profile P && aws cloudwatch get-metric-data --profile P",
+    "aws cloudwatch get-metric-statistics --profile P | aws cloudwatch get-metric-data --profile P",
+    "aws cloudwatch put-metric-alarm --alarm-name a --profile P",
+    "aws logs start-query --log-group-name /x --query-string 'fields @message' --start-time 1700000000 --end-time 1700003600 --profile EXAMPLE-NOC",
+    "aws logs start-live-tail --log-group-identifiers arn:x --profile EXAMPLE-NOC",
+    "aws logs describe-log-groups --profile EXAMPLE-NOC && aws logs start-query --log-group-name /x --query-string q --start-time 1 --end-time 2",
     "curl -X POST https://api.example.com/deploy",
     "curl -d 'a=1' https://api.example.com/x",
     "curl -o /tmp/f.bin https://example.com/f.bin",
@@ -470,6 +576,33 @@ PROMPT = [
     "ip a && ip addr add 10.0.0.1/24 dev eth0",
     "nc -zv example.com 443 && rm -rf /tmp/x",
     "ifconfig eth0 down && ip a",
+    # --- ataques de paridade de aspas / aspas relaxadas: nunca AUTO ---
+    "aws logs describe-log-groups \\' ; rm -f /tmp/x ; echo \\'",
+    "echo \\' ; rm -f /tmp/x ; echo \\'",
+    "aws logs describe-log-groups $'a\\' ; rm -f /tmp/x ; echo \\''",
+    "aws logs describe-log-groups $\"a\" ; rm -f /tmp/x ; echo \"b\" \"\"",
+    "echo ' | aws logs describe-log-groups ' ; rm -f /tmp/x ; echo ''",
+    "echo x ' ; aws logs describe-log-groups ' ; rm -f /tmp/x",
+    "aws logs describe-log-groups --x 'unterminated ; rm -f /tmp/x",
+    "awk '{ print > $1 }' f",
+    "sort -k1 'a|b' f",
+    "jq '.a' f | sh",
+    "aws logs filter-log-events --filter-pattern 'x' ; rm -f /tmp/x",
+    "grep 'a|b' f > /tmp/out",
+    "cat 'a;b' f",
+    # --- skills: só o caminho instalado em ~/.kiro/noc-guard/skills/ é AUTO ---
+    "python3 /tmp/x/cloudtrail-search/search_trail.py --profile P",
+    "python3 ./cloudtrail-search/search_trail.py --profile P",
+    "python3 ~/.kiro/skills/cloudtrail-search/search_trail.py --profile P",
+    "python3 ~/Downloads/.kiro/noc-guard/skills/logs-search/logs_search.py insights",
+    "python3 ~/.kiro/noc-guard/skills/../../../tmp/logs-search/logs_search.py insights",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.pyc insights",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py.evil insights",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/other.py insights",
+    "python3 -c 'import os' ~/.kiro/noc-guard/skills/logs-search/logs_search.py",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py insights --query 'x' ; rm -f /tmp/x",
+    "python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py insights > /tmp/out.txt",
+    "PYTHONPATH=/tmp python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py insights",
 ]
 DENY_T = [
     "rm -rf /",
@@ -500,6 +633,8 @@ DENY_T = [
     "xxd -r -p hex.txt /bin/bash",
     "git log --ext-diff",
     "git diff --ext-cmd=rm",
+    "rg --pre /tmp/evil.sh x .",
+    "yq -i '.a = 1' f.yaml",
     # --- garantias DENY mesmo com sufixo de descarte agora aceito em R ---
     "rm -rf / 2>/dev/null",
     "rm -rf / 2>&1",
@@ -533,6 +668,10 @@ def run_tests():
     return fails == 0
 
 
+USE_AWS_DENIED = tuple(f"cloudwatch:{op}" for op in CW_BILLED) + (
+    "logs:start-query", "logs:start-live-tail", "athena", "cloudtrail:start-query")
+
+
 def apply_to_agent(agent: Path):
     if not agent.is_file():
         sys.exit(f"error: agent not found at {agent}\n"
@@ -543,6 +682,15 @@ def apply_to_agent(agent: Path):
     shell["deniedCommands"] = DENY
     shell["autoAllowReadonly"] = False   # explicit allowlist is the single source of truth
     shell["denyByDefault"] = False       # unlisted => prompts for confirmation (does not block)
+    # CUSTO ZERO também na ferramenta use_aws/aws: autoAllowReadonly aprovaria
+    # GetMetricData (é "read-only", mas sempre cobrado). O Kiro não oferece
+    # PROMPT por operação aqui, então bloqueia via deniedServices; se o operador
+    # autorizar, a chamada é feita pelo shell (que pede confirmação).
+    for key in ("use_aws", "aws"):
+        t = cfg["toolsSettings"].setdefault(key, {})
+        t.setdefault("autoAllowReadonly", True)
+        denied = [d for d in t.get("deniedServices", []) if d not in USE_AWS_DENIED]
+        t["deniedServices"] = denied + list(USE_AWS_DENIED)
     agent.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"applied to {agent}")
 

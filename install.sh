@@ -294,7 +294,7 @@ done
 if python3 -c 'import boto3' >/dev/null 2>&1; then
   say "boto3        $MSG_OPT_OK"
 else
-  say "boto3        não instalado (search_trail usará fallback nativo da AWS CLI)"
+  say "boto3        não instalado (search_trail/logs_search usarão fallback nativo da AWS CLI)"
 fi
 
 # ------------------------------------------------------- arquivos de origem
@@ -302,7 +302,8 @@ step "$MSG_VAL_REPO"
 for f in "$REPO_DIR/scripts/generate_allowlist.py" \
          "$REPO_DIR/steering/noc-readonly-first.md" \
          "$REPO_DIR/agents/noc-guard.json.template" \
-         "$REPO_DIR/skills/stop-hook/kb_reminder.py"; do
+         "$REPO_DIR/skills/stop-hook/kb_reminder.py" \
+         "$REPO_DIR/skills/logs-search/logs_search.py"; do
   [ -f "$f" ] || die "$MSG_ERR_MISSING $f"
   say "ok  ${f#"$REPO_DIR"/}"
 done
@@ -511,7 +512,7 @@ fi
 
 # ------------------------------------------------------------------ diretórios
 step "$MSG_MKDIR $KIRO_DIR"
-for d in agents noc-guard noc-guard/steering noc-guard/skills/cloudtrail-search noc-guard/skills/knowledge-builder noc-guard/skills/stop-hook noc-guard/kb; do
+for d in agents noc-guard noc-guard/steering noc-guard/skills/cloudtrail-search noc-guard/skills/knowledge-builder noc-guard/skills/stop-hook noc-guard/skills/logs-search noc-guard/kb; do
   mkdir -p "$KIRO_DIR/$d"
   say "$KIRO_DIR/$d"
 done
@@ -547,6 +548,8 @@ install -m 0755 "$REPO_DIR/skills/cloudtrail-search/search_trail.py" "$KIRO_DIR/
 say "skill (cloudtrail) -> $KIRO_DIR/noc-guard/skills/cloudtrail-search/search_trail.py"
 install -m 0755 "$REPO_DIR/skills/knowledge-builder/kb_manager.py" "$KIRO_DIR/noc-guard/skills/knowledge-builder/kb_manager.py"
 say "skill (knowledge)  -> $KIRO_DIR/noc-guard/skills/knowledge-builder/kb_manager.py"
+install -m 0755 "$REPO_DIR/skills/logs-search/logs_search.py" "$KIRO_DIR/noc-guard/skills/logs-search/logs_search.py"
+say "skill (logs)       -> $KIRO_DIR/noc-guard/skills/logs-search/logs_search.py"
 install -m 0755 "$REPO_DIR/skills/stop-hook/kb_reminder.py" "$KIRO_DIR/noc-guard/skills/stop-hook/kb_reminder.py"
 say "hook (stop)  -> $KIRO_DIR/noc-guard/skills/stop-hook/kb_reminder.py"
 

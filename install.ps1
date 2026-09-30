@@ -278,7 +278,7 @@ $hasBoto = & $PY_CMD -c "import boto3; print('ok')" 2>$null
 if ($hasBoto -eq "ok") {
     Say "boto3        $MSG_OPT_OK"
 } else {
-    Say "boto3        nao instalado (search_trail usara fallback nativo da AWS CLI)"
+    Say "boto3        nao instalado (search_trail/logs_search usarao fallback nativo da AWS CLI)"
 }
 
 # Repository Validation
@@ -287,7 +287,8 @@ $FILES = @(
     "scripts\generate_allowlist.py",
     "steering\noc-readonly-first.md",
     "agents\noc-guard.json.template",
-    "skills\stop-hook\kb_reminder.py"
+    "skills\stop-hook\kb_reminder.py",
+    "skills\logs-search\logs_search.py"
 )
 foreach ($f in $FILES) {
     $fullPath = Join-Path $REPO_DIR $f
@@ -447,7 +448,7 @@ if ($KB_BUCKET) {
 
 # Directories
 Step "$MSG_MKDIR $KIRO_DIR"
-foreach ($d in @("agents", "noc-guard", "noc-guard\steering", "noc-guard\skills\cloudtrail-search", "noc-guard\skills\knowledge-builder", "noc-guard\skills\stop-hook", "noc-guard\kb")) {
+foreach ($d in @("agents", "noc-guard", "noc-guard\steering", "noc-guard\skills\cloudtrail-search", "noc-guard\skills\knowledge-builder", "noc-guard\skills\stop-hook", "noc-guard\skills\logs-search", "noc-guard\kb")) {
     $dPath = Join-Path $KIRO_DIR $d
     if (-not (Test-Path $dPath)) { New-Item -ItemType Directory -Path $dPath -Force | Out-Null }
     Say $dPath
@@ -489,6 +490,9 @@ Say "skill (cloudtrail) -> $SKILL_CT"
 $SKILL_KB = Join-Path $KIRO_DIR "noc-guard\skills\knowledge-builder\kb_manager.py"
 Copy-Item (Join-Path $REPO_DIR "skills\knowledge-builder\kb_manager.py") $SKILL_KB -Force
 Say "skill (knowledge)  -> $SKILL_KB"
+$SKILL_LOGS = Join-Path $KIRO_DIR "noc-guard\skills\logs-search\logs_search.py"
+Copy-Item (Join-Path $REPO_DIR "skills\logs-search\logs_search.py") $SKILL_LOGS -Force
+Say "skill (logs)       -> $SKILL_LOGS"
 $SKILL_HOOK = Join-Path $KIRO_DIR "noc-guard\skills\stop-hook\kb_reminder.py"
 Copy-Item (Join-Path $REPO_DIR "skills\stop-hook\kb_reminder.py") $SKILL_HOOK -Force
 Say "hook (stop)  -> $SKILL_HOOK"
