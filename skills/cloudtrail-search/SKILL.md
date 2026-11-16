@@ -36,7 +36,7 @@ ou mudanças dentro do Kubernetes (use `logs_search.py k8s-audit`).
 
 | Parâmetro | Obrigatório | Padrão | Descrição |
 |---|---|---|---|
-| `--profile` | sim | — | Profile AWS resolvido pelo `aws-profile-resolver` (ex.: `CL048-NOC`). |
+| `--profile` | sim | — | Profile AWS resolvido pelo `aws-profile-resolver` (ex.: `CLXXX-NOC`). |
 | `--region` | não | `us-east-1` | Região consultada (o CloudTrail é regional; eventos globais como IAM ficam em `us-east-1`). |
 | `--since` | não | `1h` | Janela relativa: `N` + `m`/`h`/`d` (ex.: `30m`, `6h`, `7d`). Máx. `87600`; a API só guarda 90 dias. |
 | `--event-name` | não | — | Filtra por `EventName` (ex.: `TerminateInstances`). |
@@ -52,19 +52,19 @@ exit code 1. Para cruzar critérios, filtre pelo mais seletivo e refine com `gre
 
 ```bash
 # O que mudou na última hora na conta?
-python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CL048-NOC --since 1h
+python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CLXXX-NOC --since 1h
 
 # Quem mexeu nesta instância RDS nas últimas 24h?
-python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CL048-NOC --region sa-east-1 --since 24h --resource-name db-prod-01
+python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CLXXX-NOC --region sa-east-1 --since 24h --resource-name db-prod-01
 
 # Alguém encerrou instâncias nos últimos 7 dias?
-python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CL048-NOC --region sa-east-1 --since 7d --event-name TerminateInstances
+python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CLXXX-NOC --region sa-east-1 --since 7d --event-name TerminateInstances
 
 # Erros (AccessDenied/Throttling) de uma sessão específica
-python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CL048-NOC --since 6h --username botocore-session-1700000000 --errors-only
+python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CLXXX-NOC --since 6h --username botocore-session-1700000000 --errors-only
 
 # Refinar a saída sem estourar contexto
-python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CL048-NOC --since 24h --event-name UpdateService | grep -v Success
+python3 ~/.kiro/noc-guard/skills/cloudtrail-search/search_trail.py --profile CLXXX-NOC --since 24h --event-name UpdateService | grep -v Success
 ```
 
 ## Limites de segurança e de tokens
