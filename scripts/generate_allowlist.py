@@ -450,7 +450,7 @@ AUTO = [
     "aws ec2 describe-instances --query 'Reservations[].Instances[] | length(@)' --profile EXAMPLE-NOC",
     "kubectl -n production get pods -o jsonpath='{range .items[*]}{.metadata.name}{\"\\n\"}{end}' | grep -E 'api|worker'",
     "grep -E 'ERROR|FATAL' app.log | wc -l",
-    "python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket b --kb-profile Dev-NOC --action add --alert \"X\" --content \"CPU > 80% & readiness | 503\"",
+    "python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket b --kb-profile EXAMPLE-KB --action add --alert \"X\" --content \"CPU > 80% & readiness | 503\"",
     "echo \"it's ok\"; date -u",
     "echo \"EXIT=$?\"",
     # bash: a string inteira fica entre aspas (\\" escapado) => rm NÃO executa
