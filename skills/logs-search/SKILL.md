@@ -37,10 +37,10 @@ Comuns: `--profile` (obrigatório), `--region` (`us-east-1`), `--since` (`1h`, m
 ## Exemplos
 
 ```bash
-python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py sources --profile CL048-NOC --cluster eks-prod --name api-foo
-python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py k8s-audit --profile CL048-NOC --cluster eks-prod -n production --name api-foo --since 24h
-python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py k8s-events --profile CL048-NOC --cluster eks-prod -n production --name api-foo --since 6h --type Warning
-python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py logs --profile CL048-NOC --log-group /aws/ecs/app --since 3h --filter-pattern '?timeout ?refused' --group-by bin
+python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py sources --profile CLXXX-NOC --cluster eks-prod --name api-foo
+python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py k8s-audit --profile CLXXX-NOC --cluster eks-prod -n production --name api-foo --since 24h
+python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py k8s-events --profile CLXXX-NOC --cluster eks-prod -n production --name api-foo --since 6h --type Warning
+python3 ~/.kiro/noc-guard/skills/logs-search/logs_search.py logs --profile CLXXX-NOC --log-group /aws/ecs/app --since 3h --filter-pattern '?timeout ?refused' --group-by bin
 ```
 
 ## Limites de segurança e de tokens
