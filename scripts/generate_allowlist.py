@@ -357,7 +357,7 @@ AUTO = [
     "kubectl --context example-ctx auth whoami",
     "kubectl -n production rollout history deploy/api-foo",
     "kubectl -n production rollout status deploy/api-foo --timeout 10s",
-    "aws eks update-kubeconfig --name eks-x --region us-east-1 --profile EXAMPLE-NOC --alias cl038 --kubeconfig ~/.kube/noc-guard",
+    "aws eks update-kubeconfig --name eks-x --region us-east-1 --profile EXAMPLE-NOC --alias example-ctx --kubeconfig ~/.kube/noc-guard",
     "aws eks update-kubeconfig --name meu-cluster-eks --region us-east-1 --profile EXAMPLE-PROD-NOC --alias exemplo-prod",
     "aws logs stop-query --query-id abc123 --profile EXAMPLE-NOC",
     "git status --short && git log --oneline -5",
