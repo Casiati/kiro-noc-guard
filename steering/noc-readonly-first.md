@@ -48,6 +48,17 @@ Time windows without substitution:
 - When an epoch is required (e.g. `filter-log-events --start-time`), first run `date -u -d '6 hours ago' +%s` as its own call, then paste the literal value (append `000` for milliseconds).
 - For AWS calls, the `use_aws` tool is also auto-approved and avoids shell parsing entirely.
 
+## Token Containment in Logs and Commands (MANDATORY)
+
+Every line of output enters the context window. Pull only what answers the current question.
+
+- Filter at the source, never load raw logs whole. Prefer the skills (`logs_search.py`, `search_trail.py`, already aggregated and capped) or server-side filters (`--filter-pattern`, `--query` JMESPath, `--max-items`). For local files/outputs, extract with `grep -E`, `jq`, `awk`, `cut`, `sort | uniq -c` instead of `cat` on the whole file (e.g. `grep -E 'ERROR|FATAL' app.log | tail -n 40`, `jq -r '.events[].message' f.json | head -n 50`).
+- Size before reading: when the volume is unknown, run `wc -l <file>` or append `| wc -l` first, then decide the slice.
+- Default cap: every read that can exceed ~50 lines must end with `| head -n 50` / `| tail -n 50` (or use `--limit`/`--max-items`). Never dump unbounded output.
+- Outputs over 50 lines that you genuinely need to inspect in parts (e.g. a long `kubectl describe`, a JSON dump, a full log page): redirect ONCE to a local temporary file under `/tmp/noc-guard/` (e.g. `kubectl ... describe pod x > /tmp/noc-guard/pod-x.txt`), then inspect only the relevant slices with auto-approved reads (`grep -n`, `head -n`, `tail -n`, `wc -l`, `jq`, `awk`). Never re-run the same heavy command just to see another part of it.
+  - The redirect (`>`) is a local disk write, so the allowlist will ask for native confirmation. It does not touch infrastructure or service state: state the target file in one line instead of the full mutation alert. Write only under `/tmp/noc-guard/`, never over existing files outside it, and never put secrets there.
+- Truncation markers (`... [Truncated at 100 results ...]`, `TRUNCADO`, `PARCIAL`, `# exibindo N de M`) mean the data is incomplete: narrow the filter/window instead of raising limits blindly, and never conclude "nothing else happened" from a truncated result.
+
 ## Rules for Mutation Commands / Confirmation
 
 __LANGUAGE_RULE__
