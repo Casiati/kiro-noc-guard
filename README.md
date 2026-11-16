@@ -52,12 +52,21 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
 *(Ou baixe o pacote pronto diretamente na [página de Releases](https://github.com/Casiati/kiro-noc-guard/releases/latest)).*
 
 ### 🛠️ Como testar e auditar regras
-A segurança do guard é garantida pelo gerador `generate_allowlist.py`, que roda uma suíte com mais de 220 testes automatizados para certificar que não há vulnerabilidades de bypass.
+A segurança do guard é garantida pelo gerador `generate_allowlist.py`, que roda uma suíte com mais de 290 testes automatizados para certificar que não há vulnerabilidades de bypass.
 ```bash
 # Rodar a suíte de testes (sem alterar o agente)
 python3 scripts/generate_allowlist.py --check
 ```
 Se precisar liberar um novo comando de leitura, adicione-o no gerador (`generate_allowlist.py`) e rode os testes. Isso garante que injeções perigosas continuem bloqueadas e seu ambiente seguro.
+
+### 🧩 Validação das skills
+Cada skill em `skills/<nome>/` tem um `SKILL.md` (frontmatter `name`/`description` + documentação). O linter `validate_skills.py` verifica, sem executar nada: frontmatter válido, ausência de mutação não supervisionada nos scripts (SDK `delete_*`/`put_*`..., `aws ... delete-*`, `aws s3 sync/cp/rm`, `kubectl delete/apply/rollout restart`, escrita/remoção em disco, `shell=True`), APIs cobradas (Logs Insights, Live Tail, `GetMetricData`, Athena — sem exceção) e contenção de tokens (consultas a `FilterLogEvents`/`LookupEvents`/`GetLogEvents` precisam de limite ou teto de resultados).
+```bash
+python3 scripts/validate_skills.py         # exit 0 = conforme
+python3 scripts/test_validate_skills.py    # testes do validador
+python3 scripts/test_allowlist.py          # suíte de allowlist como unittest
+```
+Escritas legítimas e restritas ao escopo da própria skill (ex.: cache e bucket da KB) devem ser marcadas com `# noc-guard: allow-mutation: <motivo>` na mesma linha ou na anterior; o validador as lista como `NOTE` para auditoria.
 
 ---
 
@@ -108,9 +117,18 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; .\install.ps1
 *(Or download the pre-packaged archive directly from the [Releases page](https://github.com/Casiati/kiro-noc-guard/releases/latest)).*
 
 ### 🛠️ Testing & Modifying Rules
-Security is enforced by the python generator (`generate_allowlist.py`), containing 220+ automated test cases to prevent bypass vulnerabilities.
+Security is enforced by the python generator (`generate_allowlist.py`), containing 290+ automated test cases to prevent bypass vulnerabilities.
 ```bash
 # Run test suite to validate rules (dry-run)
 python3 scripts/generate_allowlist.py --check
 ```
 When adding a new allowed command, modify the python script and re-run the tests. This ensures edge cases like `good-command && rm -rf /` remain securely blocked.
+
+### 🧩 Skill Validation
+Each skill in `skills/<name>/` ships a `SKILL.md` (`name`/`description` frontmatter + docs). The `validate_skills.py` linter statically checks: valid frontmatter, no unsupervised mutation in skill scripts (SDK `delete_*`/`put_*`..., `aws ... delete-*`, `aws s3 sync/cp/rm`, `kubectl delete/apply/rollout restart`, disk writes/removals, `shell=True`), billed APIs (Logs Insights, Live Tail, `GetMetricData`, Athena — never allowed) and token containment (`FilterLogEvents`/`LookupEvents`/`GetLogEvents` calls need a limit or an explicit result cap).
+```bash
+python3 scripts/validate_skills.py         # exit 0 = compliant
+python3 scripts/test_validate_skills.py    # validator tests
+python3 scripts/test_allowlist.py          # allowlist suite as unittest
+```
+Legitimate writes scoped to the skill itself (e.g. the KB cache and bucket) must be tagged with `# noc-guard: allow-mutation: <reason>` on the same or previous line; the validator lists them as `NOTE` for auditing.

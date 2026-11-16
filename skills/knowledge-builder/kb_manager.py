@@ -32,6 +32,7 @@ def s3_sync_cmd(src, dst, profile=None):
     OUTRA conta esteja ativa. Por isso este profile é sempre independente
     do --profile usado na investigação do incidente.
     """
+    # noc-guard: allow-mutation: sync apenas entre o cache local e o bucket da KB do NOC (nunca conta de cliente)
     cmd = ["aws", "s3", "sync", src, dst, "--exact-timestamps"]
     if profile:
         cmd.extend(["--profile", profile])
@@ -79,6 +80,7 @@ def add_entry(bucket, local_dir, alert_name, content, profile=None):
     
     entry_text = f"\n### [{date_str}] {alert_name}\n{content.strip()}\n"
     
+    # noc-guard: allow-mutation: append do registro no cache local da KB (~/.kiro/noc-guard/kb)
     with open(file_path, "a", encoding="utf-8") as f:
         f.write(entry_text)
     
@@ -138,6 +140,7 @@ def main():
         sys.exit(1)
     
     local_dir = Path.home() / ".kiro" / "noc-guard" / "kb"
+    # noc-guard: allow-mutation: cria o diretório de cache local da KB se ainda não existir
     local_dir.mkdir(parents=True, exist_ok=True)
     
     if args.action == "add":
