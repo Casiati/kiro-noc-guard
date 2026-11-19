@@ -19,7 +19,7 @@ causa raiz, evidências e recomendação para a equipe.
 |---|---|---|
 | `--bucket` | sim | Bucket S3 da KB (3-63 caracteres, validado). |
 | `--action` | sim | `search`, `add` ou `sync`. |
-| `--query` | `search` | Termo pesquisado (case-insensitive) nos `.md`. |
+| `--query` | `search` | Um ou mais termos. Todos devem aparecer no arquivo, em qualquer ordem (AND); acentos e maiúsculas são ignorados. |
 | `--alert` | `add` | Nome curto do alerta/tópico (vira o nome do arquivo). |
 | `--content` | `add` | Resumo: causa raiz, evidências, recomendação. |
 | `--kb-profile` | não | Profile da conta do bucket (independente do profile do incidente). Também via `KB_PROFILE`. |
@@ -30,6 +30,14 @@ causa raiz, evidências e recomendação para a equipe.
 python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket <bucket> --kb-profile <profile> --action search --query "rds-prod HighCPU"
 python3 ~/.kiro/noc-guard/skills/knowledge-builder/kb_manager.py --bucket <bucket> --kb-profile <profile> --action add --alert "rds-prod HighCPU" --content "Causa: job noturno..."
 ```
+
+### Como a busca funciona
+
+- A consulta é separada em palavras. Um arquivo só entra se contiver **todas** (nome do arquivo + conteúdo), em qualquer ordem e posição.
+- Se nenhum arquivo contém todas, a busca repete com **qualquer** palavra e avisa `Correspondência PARCIAL`, indicando `faltou: <termos>` em cada arquivo.
+- Ordenação: mais termos casados primeiro, depois o registro mais recente. Cada arquivo mostra `[N/M termos; último registro: <data>]` e só os blocos que casam (máx. 3 por arquivo, 10 arquivos).
+- `TRUNCADO` significa resultado incompleto: refine com um termo específico (ID do recurso, nome da instância) antes de concluir que não há mais registros.
+- "Nenhum registro contém todos os termos" **não** prova que a KB não tem o assunto: tente termos isolados (ID do recurso, nome da instância, tipo de alerta).
 
 ## Efeitos colaterais (declarados)
 
