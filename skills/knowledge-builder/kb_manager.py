@@ -5,6 +5,7 @@ import sys
 import argparse
 import subprocess
 import datetime
+import unicodedata
 from pathlib import Path
 
 # Mesma regra de validação de nome de bucket S3 usada em install.sh/install.ps1:
@@ -94,30 +95,120 @@ def add_entry(bucket, local_dir, alert_name, content, profile=None):
               "se necessário) quando o acesso ao bucket for restabelecido.", file=sys.stderr)
         return False
 
+# --- Busca -------------------------------------------------------------------
+# A consulta é separada em termos (palavras); acentos e caixa são ignorados nos dois
+# lados. Primeiro exige TODOS os termos no arquivo (nome + conteúdo), em qualquer
+# ordem (AND). Se ninguém satisfaz, repete com QUALQUER termo (OR), avisando que a
+# correspondência é parcial. Registros = blocos que começam em "### [data] título".
+BLOCK_SPLIT_RE = re.compile(r'(?m)^(?=### )')
+BLOCK_DATE_RE = re.compile(r'^### \[(\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?)\]')
+MAX_FILES = 10             # contenção de tokens: arquivos exibidos por consulta
+MAX_BLOCKS_PER_FILE = 3    # contenção de tokens: registros exibidos por arquivo
+
+def normalize(text):
+    """Minúsculas e sem acentos (NFKD), para comparar 'investigação' == 'investigacao'."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+def split_terms(query):
+    """Termos únicos da consulta como pares (como digitado, normalizado)."""
+    terms, seen = [], set()
+    for raw in query.split():
+        norm = normalize(raw)
+        if norm and norm not in seen:
+            seen.add(norm)
+            terms.append((raw, norm))
+    return terms
+
+def _block_date(block):
+    m = BLOCK_DATE_RE.match(block)
+    return m.group(1) if m else ""
+
+def search_kb(local_dir, query):
+    """Busca estruturada (sem saída no terminal). Retorna dict com mode/terms/files/unreadable.
+
+    mode: 'all' (todos os termos), 'partial' (só alguns) ou 'none'.
+    """
+    terms = split_terms(query)
+    candidates, unreadable = [], 0
+    for md_file in sorted(local_dir.glob("*.md")):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            unreadable += 1
+            continue
+        haystack = normalize(md_file.name + "\n" + content)
+        matched = [raw for raw, norm in terms if norm in haystack]
+        if not matched:
+            continue
+        raw_blocks = [b for b in BLOCK_SPLIT_RE.split(content) if b.strip()]
+        blocks = []
+        for raw_block in raw_blocks:
+            norm_block = normalize(raw_block)
+            hits = sum(1 for _, norm in terms if norm in norm_block)
+            if hits:
+                blocks.append({"text": raw_block.strip(), "hits": hits, "date": _block_date(raw_block)})
+        if not blocks:  # termo só no nome do arquivo: mostra o registro mais recente
+            newest = sorted(raw_blocks, key=_block_date, reverse=True)[:1]
+            blocks = [{"text": b.strip(), "hits": 0, "date": _block_date(b)} for b in newest]
+        blocks.sort(key=lambda b: (b["hits"], b["date"]), reverse=True)
+        candidates.append({
+            "name": md_file.name,
+            "matched": matched,
+            "missing": [raw for raw, _ in terms if raw not in matched],
+            "blocks": blocks,
+            "latest": max((b["date"] for b in blocks), default=""),
+        })
+
+    def rank(f):
+        return (len(f["matched"]), f["latest"])
+
+    full = sorted((f for f in candidates if not f["missing"]), key=rank, reverse=True)
+    if full:
+        return {"mode": "all", "terms": terms, "files": full, "unreadable": unreadable}
+    if candidates and len(terms) > 1:
+        return {"mode": "partial", "terms": terms,
+                "files": sorted(candidates, key=rank, reverse=True), "unreadable": unreadable}
+    return {"mode": "none", "terms": terms, "files": [], "unreadable": unreadable}
+
 def search_entry(bucket, local_dir, query, profile=None):
     if bucket:
         sync_from_s3(bucket, local_dir, profile)
-        
-    print(f"🔎 Pesquisando por '{query}' na base de conhecimento...")
-    found = False
-    query_lower = query.lower()
-    
-    for md_file in local_dir.glob("*.md"):
-        try:
-            content = md_file.read_text(encoding="utf-8")
-            if query_lower in content.lower():
-                print(f"\n📄 Arquivo: {md_file.name}")
-                print("-" * 60)
-                # Exibe blocos correspondentes
-                for block in content.split("### "):
-                    if query_lower in block.lower():
-                        print(f"### {block.strip()}\n")
-                found = True
-        except Exception as e:
-            pass
-            
-    if not found:
-        print(f"Nenhum registro encontrado para '{query}'.")
+
+    result = search_kb(local_dir, query)
+    terms = result["terms"]
+    print(f"🔎 Pesquisando por '{query}' na base de conhecimento "
+          f"(termos: {', '.join(raw for raw, _ in terms)}; acentos e maiúsculas ignorados)...")
+    if result["unreadable"]:
+        print(f"⚠️ {result['unreadable']} arquivo(s) da KB não puderam ser lidos; "
+              "o resultado pode estar incompleto.", file=sys.stderr)
+
+    if result["mode"] == "none":
+        print("Nenhum registro contém todos os termos. "
+              "Tente termos isolados: ID do recurso, nome da instância, tipo de alerta.")
+        return
+
+    files = result["files"]
+    if result["mode"] == "partial":
+        print("⚠️ Correspondência PARCIAL: nenhum arquivo contém todos os termos. "
+              "Mostrando arquivos com ao menos um (mais termos casados primeiro).")
+    for f in files[:MAX_FILES]:
+        info = f"{len(f['matched'])}/{len(terms)} termos"
+        if f["missing"]:
+            info += f"; faltou: {', '.join(f['missing'])}"
+        if f["latest"]:
+            info += f"; último registro: {f['latest']}"
+        print(f"\n📄 Arquivo: {f['name']}  [{info}]")
+        print("-" * 60)
+        for block in f["blocks"][:MAX_BLOCKS_PER_FILE]:
+            print(f"{block['text']}\n")
+        extra = len(f["blocks"]) - MAX_BLOCKS_PER_FILE
+        if extra > 0:
+            print(f"... [TRUNCADO: +{extra} registro(s) neste arquivo; refine os termos]\n")
+    if len(files) > MAX_FILES:
+        print(f"\n⚠️ TRUNCADO: exibindo {MAX_FILES} de {len(files)} arquivos "
+              "(ordenados por termos casados e data). Refine com um termo específico "
+              "(ID do recurso, nome da instância) antes de concluir que não há mais registros.")
 
 def main():
     parser = argparse.ArgumentParser(description="Gerenciador da Base de Conhecimento do NOC (S3 Sync)")
